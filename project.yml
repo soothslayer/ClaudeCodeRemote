@@ -1,0 +1,52 @@
+name: ClaudeCodeRemote
+options:
+  bundleIdPrefix: com.claudecoderemote
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  ClaudeCodeRemote:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: Sources
+        excludes:
+          - "**/.DS_Store"
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Claude Code Remote
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSMicrophoneUsageDescription: "Claude Code Remote needs your microphone to hear voice commands."
+        NSSpeechRecognitionUsageDescription: "Claude Code Remote uses speech recognition to convert your voice to text for Claude Code."
+        UIBackgroundModes:
+          - fetch
+          - audio
+          - remote-notification
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        UILaunchScreen:
+          UIColorName: ""
+          UIImageName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
+        UIUserInterfaceStyle: Dark
+    entitlements:
+      path: Sources/ClaudeCodeRemote.entitlements
+      properties:
+        aps-environment: development
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.claudecoderemote.app
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_PREVIEWS: "YES"
