@@ -1,0 +1,347 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A6FC793DE1E37170D504773 /* VoiceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */; };
+		17C86BB1CD340DBA3B760B98 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7623456EF8908AB075269730 /* SessionManager.swift */; };
+		387FDD5D29D33C53EEF2D61F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F1C021D81542D058CEE5B5 /* AppDelegate.swift */; };
+		4146788A4DDC3EB366BFF915 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4152E76DB509BBBBA65FD795 /* Assets.xcassets */; };
+		55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */; };
+		91BAF8071D070281BA59AD46 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FDFF5732D5541988C1E70FB /* NotificationManager.swift */; };
+		C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FD1885D55DC54CBB4EEB22 /* APIService.swift */; };
+		CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */; };
+		EA7AA888D38D61E7A9EA0CA4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF3F705E5374E00BF6CEBFCE /* ContentView.swift */; };
+		F9D1F93E0F36AC02324C259B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		12F1C021D81542D058CEE5B5 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		2FDFF5732D5541988C1E70FB /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
+		30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeRemoteApp.swift; sourceTree = "<group>"; };
+		37063B2E799F980DF4C247A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		4152E76DB509BBBBA65FD795 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceManager.swift; sourceTree = "<group>"; };
+		4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		7623456EF8908AB075269730 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
+		77FD1885D55DC54CBB4EEB22 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
+		ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		C283A8DDA97ACA3ED9020F75 /* ClaudeCodeRemote.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeCodeRemote.entitlements; sourceTree = "<group>"; };
+		CF3F705E5374E00BF6CEBFCE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ClaudeCodeRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0C87F98CCB9C63ECB2EA147D /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				77FD1885D55DC54CBB4EEB22 /* APIService.swift */,
+				12F1C021D81542D058CEE5B5 /* AppDelegate.swift */,
+				ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */,
+				4152E76DB509BBBBA65FD795 /* Assets.xcassets */,
+				C283A8DDA97ACA3ED9020F75 /* ClaudeCodeRemote.entitlements */,
+				30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */,
+				CF3F705E5374E00BF6CEBFCE /* ContentView.swift */,
+				37063B2E799F980DF4C247A1 /* Info.plist */,
+				2FDFF5732D5541988C1E70FB /* NotificationManager.swift */,
+				7623456EF8908AB075269730 /* SessionManager.swift */,
+				4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */,
+				4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		B97B74A33CD89F8DF97EDB78 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FE97A1992CECC3089958700D = {
+			isa = PBXGroup;
+			children = (
+				0C87F98CCB9C63ECB2EA147D /* Sources */,
+				B97B74A33CD89F8DF97EDB78 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F34CCBF3D3A88101047D3B08 /* ClaudeCodeRemote */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0F41CA371566629FC0F5325E /* Build configuration list for PBXNativeTarget "ClaudeCodeRemote" */;
+			buildPhases = (
+				14862D2671A793A8A211147C /* Sources */,
+				ED86AA44D1AA1746BD664317 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ClaudeCodeRemote;
+			packageProductDependencies = (
+			);
+			productName = ClaudeCodeRemote;
+			productReference = D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0E117E7D809312838CD05C43 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					F34CCBF3D3A88101047D3B08 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 08CA3E44090EBBA8BA5C5020 /* Build configuration list for PBXProject "ClaudeCodeRemote" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = FE97A1992CECC3089958700D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B97B74A33CD89F8DF97EDB78 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F34CCBF3D3A88101047D3B08 /* ClaudeCodeRemote */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		ED86AA44D1AA1746BD664317 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4146788A4DDC3EB366BFF915 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		14862D2671A793A8A211147C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */,
+				387FDD5D29D33C53EEF2D61F /* AppDelegate.swift in Sources */,
+				F9D1F93E0F36AC02324C259B /* AppState.swift in Sources */,
+				55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */,
+				EA7AA888D38D61E7A9EA0CA4 /* ContentView.swift in Sources */,
+				91BAF8071D070281BA59AD46 /* NotificationManager.swift in Sources */,
+				17C86BB1CD340DBA3B760B98 /* SessionManager.swift in Sources */,
+				CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */,
+				0A6FC793DE1E37170D504773 /* VoiceManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0041ECDD920FDE4C4E9EE1BC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AA72EAF71DAB0161C09C7C57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/ClaudeCodeRemote.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Sources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claudecoderemote.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D43A35224E064EF7E9F8713B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Sources/ClaudeCodeRemote.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Sources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.claudecoderemote.app;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		E182C64061B4FF84A902F654 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		08CA3E44090EBBA8BA5C5020 /* Build configuration list for PBXProject "ClaudeCodeRemote" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0041ECDD920FDE4C4E9EE1BC /* Debug */,
+				E182C64061B4FF84A902F654 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		0F41CA371566629FC0F5325E /* Build configuration list for PBXNativeTarget "ClaudeCodeRemote" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA72EAF71DAB0161C09C7C57 /* Debug */,
+				D43A35224E064EF7E9F8713B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 0E117E7D809312838CD05C43 /* Project object */;
+}
