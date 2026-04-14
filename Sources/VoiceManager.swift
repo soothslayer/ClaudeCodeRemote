@@ -34,6 +34,8 @@ final class VoiceManager: NSObject, ObservableObject {
     // MARK: - Permissions
 
     func requestPermissions() async -> Bool {
+        let log = AppLogger.shared
+        log.log("requesting mic permission…", tag: "PERM")
         let micGranted: Bool
         if #available(iOS 17.0, *) {
             micGranted = await AVAudioApplication.requestRecordPermission()
@@ -44,12 +46,15 @@ final class VoiceManager: NSObject, ObservableObject {
                 }
             }
         }
+        log.log("mic granted=\(micGranted)", tag: "PERM")
 
+        log.log("requesting speech recognition permission…", tag: "PERM")
         let speechGranted = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             SFSpeechRecognizer.requestAuthorization { status in
                 cont.resume(returning: status == .authorized)
             }
         }
+        log.log("speech granted=\(speechGranted)", tag: "PERM")
 
         return micGranted && speechGranted
     }
@@ -57,16 +62,22 @@ final class VoiceManager: NSObject, ObservableObject {
     // MARK: - TTS
 
     func speak(_ text: String) async {
+        let log = AppLogger.shared
+        let preview = String(text.prefix(60))
+        log.log("speak() start: \"\(preview)\"", tag: "TTS")
+
         // Stop any active listening before speaking
         stopListeningInternal()
 
-        activateAudioForPlayback()
+        let sessionResult = activateAudioForPlayback()
+        log.log("audio session activate result=\(sessionResult)", tag: "TTS")
 
         if synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
         }
 
         isSpeaking = true
+        log.log("synthesizer.speak() called, isSpeaking=true", tag: "TTS")
 
         await withCheckedContinuation { [weak self] (continuation: CheckedContinuation<Void, Never>) in
             guard let self else {
@@ -82,6 +93,7 @@ final class VoiceManager: NSObject, ObservableObject {
             synthesizer.speak(utterance)
         }
 
+        log.log("speak() continuation resumed — done", tag: "TTS")
         isSpeaking = false
     }
 
@@ -135,10 +147,16 @@ final class VoiceManager: NSObject, ObservableObject {
 
     // MARK: - Private audio helpers
 
-    private func activateAudioForPlayback() {
+    @discardableResult
+    private func activateAudioForPlayback() -> String {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .mixWithOthers])
-        try? session.setActive(true)
+        do {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .mixWithOthers])
+            try session.setActive(true)
+            return "ok (route=\(session.currentRoute.outputs.map(\.portName).joined(separator: ",")))"
+        } catch {
+            return "FAILED: \(error)"
+        }
     }
 
     private func activateAudioForRecording() {
@@ -246,6 +264,7 @@ final class VoiceManager: NSObject, ObservableObject {
 extension VoiceManager: AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
+            AppLogger.shared.log("delegate: didFinish", tag: "TTS")
             self?.speakContinuation?.resume()
             self?.speakContinuation = nil
         }
@@ -253,8 +272,15 @@ extension VoiceManager: AVSpeechSynthesizerDelegate {
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
+            AppLogger.shared.log("delegate: didCancel", tag: "TTS")
             self?.speakContinuation?.resume()
             self?.speakContinuation = nil
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            AppLogger.shared.log("delegate: didStart", tag: "TTS")
         }
     }
 }

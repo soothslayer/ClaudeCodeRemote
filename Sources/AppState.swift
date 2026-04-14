@@ -41,28 +41,31 @@ final class AppState: ObservableObject {
     // MARK: - Entry point
 
     func onAppear() async {
+        let log = AppLogger.shared
+        log.log("onAppear start", tag: "INIT")
+
         isRequestingPermissions = true
+        log.log("requesting permissions…", tag: "INIT")
         let granted = await voiceManager.requestPermissions()
         isRequestingPermissions = false
+        log.log("permissions granted=\(granted)", tag: "INIT")
 
         guard granted else {
             let msg = "Permissions required. Please open Settings and allow microphone and speech recognition access, then restart the app."
+            log.log("permissions denied — showing error", tag: "INIT")
             await transition(to: .error(msg))
-            // Don't try to speak — we may not have audio permissions yet.
-            // VoiceOver will read the accessibility label instead.
             return
         }
 
-        // Stay in .idle and wait for a deliberate tap before touching the audio
-        // session. Attempting to speak immediately after permission dialogs dismiss
-        // can cause AVSpeechSynthesizer to silently fail due to audio session
-        // timing issues on first launch.
+        log.log("transitioning to .idle — waiting for tap", tag: "INIT")
         await transition(to: .idle)
     }
 
     // MARK: - Greeting
 
     private func greet() async {
+        let log = AppLogger.shared
+        log.log("greet() start, hasSession=\(sessionManager.hasSession)", tag: "GREET")
         await transition(to: .speaking)
         let greeting: String
         if sessionManager.hasSession {
@@ -70,7 +73,9 @@ final class AppState: ObservableObject {
         } else {
             greeting = "Welcome to Claude Code Remote. Say new session to get started."
         }
+        log.log("calling speak(greeting)…", tag: "GREET")
         await voiceManager.speak(greeting)
+        log.log("speak(greeting) returned", tag: "GREET")
         await transition(to: .listeningForChoice)
         await listenForSessionChoice()
     }
@@ -204,6 +209,7 @@ final class AppState: ObservableObject {
             await greet()
 
         case .idle:
+            AppLogger.shared.log("tap received in .idle — starting greet()", tag: "TAP")
             await greet()
 
         case .processing:

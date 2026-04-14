@@ -1,5 +1,6 @@
 import SwiftUI
 import VisionKit
+import UIKit
 
 // MARK: - SettingsView
 // Accessed via long press. Intended for a sighted caregiver to configure
@@ -9,9 +10,11 @@ struct SettingsView: View {
 
     @AppStorage("serverURL") private var serverURL: String = ""
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var logger = AppLogger.shared
     @State private var urlDraft: String = ""
     @State private var showingScanner = false
     @State private var showingConfirmation = false
+    @State private var showingLogs = false
 
     var body: some View {
         NavigationStack {
@@ -53,6 +56,17 @@ struct SettingsView: View {
                 } footer: {
                     Text("Clearing the session means the next voice request will start a brand new Claude Code conversation.")
                 }
+
+                Section {
+                    Button("View Logs (\(logger.entries.count))") {
+                        showingLogs = true
+                    }
+                    Button("Clear Logs", role: .destructive) {
+                        AppLogger.shared.clear()
+                    }
+                } header: {
+                    Text("Diagnostics")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -66,6 +80,9 @@ struct SettingsView: View {
             } message: {
                 Text("Server URL has been saved. Return to the main screen and tap anywhere to start.")
             }
+            .sheet(isPresented: $showingLogs) {
+                LogViewer()
+            }
             .sheet(isPresented: $showingScanner) {
                 QRScannerView { url in
                     urlDraft = url
@@ -76,6 +93,61 @@ struct SettingsView: View {
             .onAppear {
                 urlDraft = serverURL
             }
+        }
+    }
+}
+
+// MARK: - LogViewer
+
+struct LogViewer: View {
+    @ObservedObject private var logger = AppLogger.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(logger.entries) { entry in
+                            Text(entry.formatted)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(color(for: entry.tag))
+                                .textSelection(.enabled)
+                                .id(entry.id)
+                        }
+                    }
+                    .padding()
+                }
+                .onChange(of: logger.entries.count) { _ in
+                    if let last = logger.entries.last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+            .navigationTitle("Logs")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Copy") {
+                        UIPasteboard.general.string = logger.text
+                    }
+                }
+            }
+            .background(Color.black)
+        }
+    }
+
+    private func color(for tag: String) -> Color {
+        switch tag {
+        case "TTS":   return .cyan
+        case "PERM":  return .yellow
+        case "INIT":  return .green
+        case "GREET": return .mint
+        case "TAP":   return .orange
+        default:      return .white
         }
     }
 }
