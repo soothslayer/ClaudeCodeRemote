@@ -18,10 +18,24 @@ logger = logging.getLogger(__name__)
 # Directory Claude Code will run in (i.e. the project it works on)
 WORK_DIR = Path("~/git/buck").expanduser()
 
+# Path to our computer-use MCP server script
+_MCP_SERVER = Path(__file__).parent / "computer_use_mcp.py"
+
+# Inline --mcp-config JSON: starts our local computer-use MCP server as a sidecar
+_MCP_CONFIG = json.dumps({
+    "mcpServers": {
+        "mac-input": {
+            "type": "stdio",
+            "command": "python3",
+            "args": [str(_MCP_SERVER)],
+        }
+    }
+})
+
 
 def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
     """
-    Run Claude Code non-interactively.
+    Run Claude Code non-interactively with computer-use MCP tools available.
 
     Returns:
         (response_text, session_id)  — session_id may be new or the same one passed in.
@@ -34,6 +48,7 @@ def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
         "--print", prompt,
         "--output-format", "json",
         "--dangerously-skip-permissions",
+        "--mcp-config", _MCP_CONFIG,
     ]
     if session_id:
         cmd += ["--resume", session_id]
