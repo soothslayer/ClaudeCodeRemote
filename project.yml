@@ -36,10 +36,6 @@ targets:
           UIApplicationSupportsMultipleScenes: false
           UISceneConfigurations: {}
         UIUserInterfaceStyle: Dark
-    entitlements:
-      path: Sources/ClaudeCodeRemote.entitlements
-      properties:
-        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.claudecoderemote.app
