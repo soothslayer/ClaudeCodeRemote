@@ -32,6 +32,9 @@ final class AppState: ObservableObject {
     private var isPaused = false
     private var pausedFromListeningState: VoiceState = .listeningForPrompt
 
+    // Cancellable API call — stored so triple-tap can cancel it mid-flight
+    private var currentApiTask: Task<(String, String), Error>?
+
     init() {
         voiceManager = VoiceManager()
         apiService = APIService()
@@ -141,19 +144,30 @@ final class AppState: ObservableObject {
         await transition(to: .processing)
         await voiceManager.speak("Got it. Sending to Claude Code now.")
 
-        do {
-            let response: String
-            if let sessionId = sessionManager.lastSessionId {
-                let result = try await apiService.sendMessage(sessionId: sessionId, prompt: text)
-                sessionManager.saveSession(id: result.sessionId)
-                response = result.response
+        // Wrap the API call in a stored Task so triple-tap can cancel it.
+        let task = Task<(String, String), Error> {
+            if let sessionId = self.sessionManager.lastSessionId {
+                let r = try await self.apiService.sendMessage(sessionId: sessionId, prompt: text)
+                return (r.sessionId, r.response)
             } else {
-                let result = try await apiService.newSession(prompt: text)
-                sessionManager.saveSession(id: result.sessionId)
-                response = result.response
+                let r = try await self.apiService.newSession(prompt: text)
+                return (r.sessionId, r.response)
             }
+        }
+        currentApiTask = task
+
+        do {
+            let (sessionId, response) = try await task.value
+            currentApiTask = nil
+            sessionManager.saveSession(id: sessionId)
             await handleIncomingResponse(response)
+        } catch is CancellationError {
+            currentApiTask = nil
+            AppLogger.shared.log("API task cancelled by user", tag: "API")
+            await voiceManager.speak("Cancelled. Tap anywhere to speak.")
+            await transition(to: .waitingForInput)
         } catch {
+            currentApiTask = nil
             let msg = errorMessage(for: error)
             await transition(to: .error(msg))
             await voiceManager.speak("Error: \(msg). Tap anywhere to try again.")
@@ -213,8 +227,16 @@ final class AppState: ObservableObject {
             await greet()
 
         case .processing:
-            await voiceManager.speak("Still waiting for Claude Code. Please be patient.")
+            await voiceManager.speak("Still thinking. Triple tap to cancel.")
         }
+    }
+
+    // MARK: - Cancel processing
+
+    func cancelProcessing() {
+        guard voiceState == .processing else { return }
+        AppLogger.shared.log("cancelProcessing() called", tag: "API")
+        currentApiTask?.cancel()
     }
 
     // MARK: - Helpers
