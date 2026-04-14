@@ -6,8 +6,10 @@ import Combine
 enum VoiceState: Equatable {
     case idle
     case speaking
+    case pausedSpeaking       // Speech paused; tap to resume
     case listeningForChoice   // New session vs continue
     case listeningForPrompt   // User's coding request
+    case pausedListening      // Listening paused; tap to resume
     case processing           // Waiting for Claude Code response
     case waitingForInput      // Response read, tap to respond
     case error(String)
@@ -24,6 +26,10 @@ final class AppState: ObservableObject {
     let voiceManager: VoiceManager
     let apiService: APIService
     let sessionManager: SessionManager
+
+    // Pause support
+    private var isPaused = false
+    private var pausedFromListeningState: VoiceState = .listeningForPrompt
 
     init() {
         voiceManager = VoiceManager()
@@ -62,6 +68,11 @@ final class AppState: ObservableObject {
 
     private func listenForSessionChoice() async {
         guard let text = await voiceManager.listen() else {
+            if isPaused {
+                pausedFromListeningState = .listeningForChoice
+                await transition(to: .pausedListening)
+                return
+            }
             await voiceManager.speak("I didn't catch that. Tap anywhere to try again.")
             await transition(to: .waitingForInput)
             return
@@ -101,6 +112,11 @@ final class AppState: ObservableObject {
 
     func listenAndSend() async {
         guard let text = await voiceManager.listen() else {
+            if isPaused {
+                pausedFromListeningState = .listeningForPrompt
+                await transition(to: .pausedListening)
+                return
+            }
             await voiceManager.speak("I didn't catch that. Tap anywhere to try again.")
             await transition(to: .waitingForInput)
             return
@@ -143,10 +159,31 @@ final class AppState: ObservableObject {
     func handleTap() async {
         switch voiceState {
         case .speaking:
-            // Stop speaking and immediately listen
-            voiceManager.stopSpeaking()
-            await transition(to: .listeningForPrompt)
-            await listenAndSend()
+            voiceManager.pauseSpeaking()
+            await transition(to: .pausedSpeaking)
+
+        case .pausedSpeaking:
+            voiceManager.resumeSpeaking()
+            await transition(to: .speaking)
+
+        case .listeningForChoice:
+            isPaused = true
+            voiceManager.stopListening()
+            // listenForSessionChoice() will check isPaused and park in .pausedListening
+
+        case .listeningForPrompt:
+            isPaused = true
+            voiceManager.stopListening()
+            // listenAndSend() will check isPaused and park in .pausedListening
+
+        case .pausedListening:
+            isPaused = false
+            await transition(to: pausedFromListeningState)
+            if pausedFromListeningState == .listeningForChoice {
+                await listenForSessionChoice()
+            } else {
+                await listenAndSend()
+            }
 
         case .waitingForInput:
             await transition(to: .listeningForPrompt)
@@ -157,14 +194,6 @@ final class AppState: ObservableObject {
 
         case .idle:
             await greet()
-
-        case .listeningForChoice:
-            voiceManager.stopListening()
-            await greet()
-
-        case .listeningForPrompt:
-            // Stop early and submit whatever was heard
-            voiceManager.stopListening()
 
         case .processing:
             await voiceManager.speak("Still waiting for Claude Code. Please be patient.")
@@ -202,8 +231,10 @@ extension VoiceState {
         switch self {
         case .idle:                return ""
         case .speaking:            return "Speaking…"
+        case .pausedSpeaking:      return "Paused — tap to resume"
         case .listeningForChoice:  return "Listening for your choice…"
         case .listeningForPrompt:  return "Listening… speak now"
+        case .pausedListening:     return "Paused — tap to resume"
         case .processing:          return "Claude Code is thinking…"
         case .waitingForInput:     return "Tap anywhere to respond"
         case .error(let msg):      return msg

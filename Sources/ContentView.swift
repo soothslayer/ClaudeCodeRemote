@@ -97,8 +97,10 @@ struct ContentView: View {
     private var backgroundColor: Color {
         switch appState.voiceState {
         case .speaking:           return Color(red: 0.1, green: 0.2, blue: 0.6)
+        case .pausedSpeaking:     return Color(red: 0.08, green: 0.12, blue: 0.35)
         case .listeningForChoice,
              .listeningForPrompt: return Color(red: 0.05, green: 0.4, blue: 0.15)
+        case .pausedListening:    return Color(red: 0.03, green: 0.22, blue: 0.08)
         case .processing:         return Color(red: 0.5, green: 0.25, blue: 0.0)
         case .waitingForInput:    return Color(red: 0.15, green: 0.1, blue: 0.3)
         case .error:              return Color(red: 0.4, green: 0.05, blue: 0.05)
@@ -109,8 +111,10 @@ struct ContentView: View {
     private var indicatorColor: Color {
         switch appState.voiceState {
         case .speaking:           return Color.blue
+        case .pausedSpeaking:     return Color.blue.opacity(0.5)
         case .listeningForChoice,
              .listeningForPrompt: return Color.green
+        case .pausedListening:    return Color.green.opacity(0.5)
         case .processing:         return Color.orange
         case .waitingForInput:    return Color.purple
         case .error:              return Color.red
@@ -121,8 +125,10 @@ struct ContentView: View {
     private var stateIcon: String {
         switch appState.voiceState {
         case .speaking:           return "speaker.wave.3.fill"
+        case .pausedSpeaking:     return "pause.fill"
         case .listeningForChoice,
              .listeningForPrompt: return "mic.fill"
+        case .pausedListening:    return "pause.fill"
         case .processing:         return "gearshape.fill"
         case .waitingForInput:    return "hand.tap.fill"
         case .error:              return "exclamationmark.triangle.fill"
@@ -134,15 +140,21 @@ struct ContentView: View {
         appState.voiceState == .listeningForChoice || appState.voiceState == .listeningForPrompt
     }
 
+    private var isPaused: Bool {
+        appState.voiceState == .pausedSpeaking || appState.voiceState == .pausedListening
+    }
+
     private var isProcessing: Bool {
         appState.voiceState == .processing
     }
 
     private var accessibilityLabel: String {
         switch appState.voiceState {
-        case .speaking:           return "Claude Code is speaking. Double tap to interrupt and respond."
-        case .listeningForChoice: return "Listening. Say new session or continue."
-        case .listeningForPrompt: return "Listening for your message. Speak now."
+        case .speaking:           return "Claude Code is speaking. Double tap to pause."
+        case .pausedSpeaking:     return "Speaking paused. Double tap to resume."
+        case .listeningForChoice: return "Listening. Say new session or continue. Double tap to pause."
+        case .listeningForPrompt: return "Listening for your message. Speak now. Double tap to pause."
+        case .pausedListening:    return "Listening paused. Double tap to resume."
         case .processing:         return "Claude Code is processing your request. Please wait."
         case .waitingForInput:    return "Ready for your response. Double tap to speak."
         case .error(let msg):     return "Error: \(msg). Double tap to try again."
