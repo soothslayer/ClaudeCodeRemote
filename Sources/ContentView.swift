@@ -30,6 +30,11 @@ struct ContentView: View {
         }
         // Full-screen tap to respond
         .contentShape(Rectangle())
+        // Triple-tap cancels an in-progress Claude Code request
+        .onTapGesture(count: 3) {
+            guard !appState.isRequestingPermissions else { return }
+            appState.cancelProcessing()
+        }
         .onTapGesture {
             guard !appState.isRequestingPermissions else { return }
             Task { await appState.handleTap() }
@@ -158,7 +163,7 @@ struct ContentView: View {
         case .listeningForChoice: return "Listening. Say new session or continue. Double tap to pause."
         case .listeningForPrompt: return "Listening for your message. Speak now. Double tap to pause."
         case .pausedListening:    return "Listening paused. Double tap to resume."
-        case .processing:         return "Claude Code is processing your request. Please wait."
+        case .processing:         return "Claude Code is thinking. Triple tap to cancel."
         case .waitingForInput:    return "Ready for your response. Double tap to speak."
         case .error(let msg):     return "Error: \(msg). Double tap to try again."
         case .idle:               return "Claude Code Remote. Ready. Double tap to start."
