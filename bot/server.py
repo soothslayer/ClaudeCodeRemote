@@ -3,9 +3,6 @@ server.py — Claude Code Remote bot server
 Runs on the user's computer. Receives requests from the iOS app, executes
 them via Claude Code, and sends responses back.
 
-Also sends Telegram notifications when a response is ready (for when the
-iOS app is backgrounded).
-
 Usage:
     cd bot/
     uvicorn server:app --host 0.0.0.0 --port 8080
@@ -25,7 +22,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from claude_runner import run_claude
-from telegram_notifier import poll_and_register, send_message
 
 # ── Config ────────────────────────────────────────────────────────────────────
 load_dotenv()
@@ -38,10 +34,7 @@ SESSION_FILE = Path(__file__).parent / "session.json"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start Telegram long-poll in background so chat_id is auto-registered
-    task = asyncio.create_task(poll_and_register())
     yield
-    task.cancel()
 
 app = FastAPI(title="Claude Code Remote", lifespan=lifespan)
 app.add_middleware(
@@ -66,15 +59,7 @@ def save_session(session_id: str, last_response: str = "") -> None:
     SESSION_FILE.write_text(json.dumps({
         "session_id": session_id,
         "last_response": last_response,
-        "pending_response": None,   # Cleared when iOS picks it up
     }))
-
-
-def set_pending_response(response: str) -> None:
-    """Store a response for the iOS background-fetch endpoint to pick up."""
-    data = load_session()
-    data["pending_response"] = response
-    SESSION_FILE.write_text(json.dumps(data))
 
 
 # ── Request / response models ─────────────────────────────────────────────────
@@ -100,8 +85,6 @@ async def new_session(req: NewSessionRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
     save_session(session_id, response)
-    await send_message(f"*Claude Code replied:*\n\n{response}")
-
     return {"session_id": session_id, "response": response}
 
 
@@ -115,30 +98,16 @@ async def send_message_endpoint(req: MessageRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
     save_session(session_id, response)
-    await send_message(f"*Claude Code replied:*\n\n{response}")
-
     return {"session_id": session_id, "response": response}
 
 
 @app.get("/session/info")
 async def session_info():
-    """
-    Returns current session state. The iOS background-fetch polls this to
-    check for a pending_response (stored when the iOS app was backgrounded).
-    Clears pending_response after reading.
-    """
+    """Returns current session state."""
     data = load_session()
-    pending = data.get("pending_response")
-
-    # Clear it so we don't re-deliver
-    if pending:
-        data["pending_response"] = None
-        SESSION_FILE.write_text(json.dumps(data))
-
     return {
         "has_session": bool(data.get("session_id")),
         "session_id": data.get("session_id"),
-        "pending_response": pending,
     }
 
 

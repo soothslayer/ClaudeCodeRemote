@@ -24,34 +24,11 @@ final class AppState: ObservableObject {
     let voiceManager: VoiceManager
     let apiService: APIService
     let sessionManager: SessionManager
-    let notificationManager: NotificationManager
-
-    private var notificationObserver: NSObjectProtocol?
 
     init() {
         voiceManager = VoiceManager()
         apiService = APIService()
         sessionManager = SessionManager()
-        notificationManager = NotificationManager.shared
-
-        // Wake up to read a response that arrived while app was backgrounded
-        notificationObserver = NotificationCenter.default.addObserver(
-            forName: .claudeResponseReceived,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let self,
-                  let text = note.userInfo?["response"] as? String else { return }
-            Task { @MainActor in
-                await self.handleIncomingResponse(text)
-            }
-        }
-    }
-
-    deinit {
-        if let observer = notificationObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
     }
 
     // MARK: - Entry point
@@ -63,7 +40,6 @@ final class AppState: ObservableObject {
             await voiceManager.speak(msg)
             return
         }
-        await notificationManager.requestPermission()
         await greet()
     }
 
@@ -153,7 +129,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Handle incoming response (from HTTP or notification)
+    // MARK: - Handle incoming response
 
     func handleIncomingResponse(_ response: String) async {
         await transition(to: .speaking)

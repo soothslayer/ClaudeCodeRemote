@@ -5,9 +5,8 @@ Your friend speaks → Claude Code thinks → the response is read aloud.
 
 ```
 iPhone mic → iOS app → bot server (your Mac) → claude CLI → response → iOS TTS
-                     ↑                                               ↓
-               (HTTP over ngrok)                        Telegram push notification
-                                                         (if app is backgrounded)
+                     ↑
+               (HTTP over ngrok)
 ```
 
 ---
@@ -20,18 +19,16 @@ ClaudeCodeRemote/
 ├── project.yml                    ← XcodeGen spec (re-run xcodegen if you add files)
 ├── Sources/                       ← All Swift source files
 │   ├── ClaudeCodeRemoteApp.swift  ← App entry point
-│   ├── AppDelegate.swift          ← APNs + background fetch
+│   ├── AppDelegate.swift          ← App lifecycle
 │   ├── AppState.swift             ← Voice state machine
 │   ├── VoiceManager.swift         ← TTS (AVSpeechSynthesizer) + STT (SFSpeechRecognizer)
 │   ├── APIService.swift           ← HTTP client → bot server
 │   ├── SessionManager.swift       ← Persists Claude Code session ID
-│   ├── NotificationManager.swift  ← Local push notifications
 │   ├── ContentView.swift          ← Full-screen tap-to-speak UI
 │   └── SettingsView.swift         ← Server URL config (long press to open)
 └── bot/                           ← Python server (runs on the computer with Claude Code)
     ├── server.py                  ← FastAPI app (main entry point)
     ├── claude_runner.py           ← Runs `claude --print` via subprocess
-    ├── telegram_notifier.py       ← Sends Telegram messages as push notifications
     ├── requirements.txt
     ├── .env.example
     └── setup.sh                   ← One-time setup script
@@ -61,11 +58,7 @@ claude login
 cd bot/
 bash setup.sh
 
-# 3. Fill in your Telegram bot token (optional but great for push notifications)
-#    Create a bot at https://t.me/BotFather, copy the token, paste into bot/.env
-nano .env
-
-# 4. Start the server
+# 3. Start the server
 source .venv/bin/activate
 python server.py
 # → Listening on http://0.0.0.0:8080
@@ -78,14 +71,6 @@ ngrok http 8080
 ```
 
 The server stays running while your friend uses the app. You can keep a terminal open or run it with `nohup python server.py &`.
-
-### Telegram push notifications (optional)
-
-1. Open Telegram and message **@BotFather** → `/newbot` → follow prompts → copy the token.
-2. Add it to `bot/.env` as `TELEGRAM_BOT_TOKEN=<token>`.
-3. Start (or restart) the server.
-4. Have your friend open Telegram and message the new bot — it will auto-confirm the connection.  
-   From then on, every Claude Code response is also delivered as a Telegram message for when the iOS app is closed.
 
 ---
 
@@ -132,8 +117,6 @@ That's all the configuration your blind friend ever needs to do (or have done fo
 | Claude Code responds | The full response is read aloud. |
 | Response finished | "Tap anywhere to respond." |
 | User taps → speaks follow-up | Repeat from send step |
-| App is closed, response arrives | Telegram push notification |
-| User taps notification → app opens | Response is read aloud automatically |
 
 **Tap during speaking** — stops the current speech and immediately starts listening.  
 **Long press** — opens Settings (for sighted setup).
@@ -147,5 +130,4 @@ That's all the configuration your blind friend ever needs to do (or have done fo
 | "Cannot reach the server" | Make sure `python server.py` is running and ngrok is active. Re-paste the URL in Settings if ngrok restarted. |
 | "Permissions required" | Go to iPhone Settings → Claude Code Remote → enable Microphone and Speech Recognition. |
 | Claude Code times out | Reduce the complexity of the prompt, or increase `TIMEOUT` in `claude_runner.py`. |
-| Telegram notifications not arriving | Confirm `TELEGRAM_BOT_TOKEN` is set in `.env` and the server was restarted after editing. Send `/start` to the bot on Telegram. |
 | Xcode signing error | Select a Development Team in Signing & Capabilities. A free Apple ID works for personal use. |
