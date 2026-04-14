@@ -24,6 +24,7 @@ final class VoiceManager: NSObject, ObservableObject {
     private var listenContinuation: CheckedContinuation<String?, Never>?
     private var silenceTimer: DispatchWorkItem?
     private let silenceDelay: TimeInterval = 1.8
+    private var capturedSpeech = ""
 
     override init() {
         super.init()
@@ -61,7 +62,7 @@ final class VoiceManager: NSObject, ObservableObject {
 
         activateAudioForPlayback()
 
-        if synthesizer.isSpeaking {
+        if synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
         }
 
@@ -85,10 +86,22 @@ final class VoiceManager: NSObject, ObservableObject {
     }
 
     func stopSpeaking() {
-        if synthesizer.isSpeaking {
+        if synthesizer.isSpeaking || synthesizer.isPaused {
             synthesizer.stopSpeaking(at: .immediate)
             // Delegate will resume the continuation
         }
+    }
+
+    /// Pause mid-utterance. The async speak() continuation stays alive.
+    func pauseSpeaking() {
+        synthesizer.pauseSpeaking(at: .immediate)
+        isSpeaking = false
+    }
+
+    /// Resume a paused utterance.
+    func resumeSpeaking() {
+        synthesizer.continueSpeaking()
+        isSpeaking = true
     }
 
     // MARK: - STT
@@ -103,6 +116,7 @@ final class VoiceManager: NSObject, ObservableObject {
         activateAudioForRecording()
 
         isListening = true
+        capturedSpeech = ""
 
         return await withCheckedContinuation { [weak self] (continuation: CheckedContinuation<String?, Never>) in
             guard let self else {
@@ -114,7 +128,7 @@ final class VoiceManager: NSObject, ObservableObject {
         }
     }
 
-    /// Stop listening early (e.g. when user taps during capture).
+    /// Stop listening early and submit whatever was heard (e.g. user taps during capture).
     func stopListening() {
         recognitionRequest?.endAudio()
     }
@@ -155,18 +169,17 @@ final class VoiceManager: NSObject, ObservableObject {
             return
         }
 
-        var capturedText = ""
-
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
 
             if let result = result {
                 let text = result.bestTranscription.formattedString
-                if !text.isEmpty { capturedText = text }
+                if !text.isEmpty { self.capturedSpeech = text }
 
                 if result.isFinal {
                     Task { @MainActor [weak self] in
-                        self?.finishListening(text: capturedText.isEmpty ? nil : capturedText)
+                        guard let self else { return }
+                        self.finishListening(text: self.capturedSpeech.isEmpty ? nil : self.capturedSpeech)
                     }
                     return
                 }
@@ -186,8 +199,9 @@ final class VoiceManager: NSObject, ObservableObject {
                 // Ignore "no speech detected" errors — return whatever we captured
                 let nsError = error as NSError
                 let isSilence = nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 1110
+                let captured = self.capturedSpeech
                 Task { @MainActor [weak self] in
-                    self?.finishListening(text: (capturedText.isEmpty || isSilence) ? nil : capturedText)
+                    self?.finishListening(text: (captured.isEmpty || isSilence) ? nil : captured)
                 }
             }
         }
@@ -204,6 +218,7 @@ final class VoiceManager: NSObject, ObservableObject {
     private func finishListening(text: String?) {
         guard isListening else { return }   // Prevent double-firing
         isListening = false
+        capturedSpeech = ""
 
         silenceTimer?.cancel()
         silenceTimer = nil
