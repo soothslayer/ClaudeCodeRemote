@@ -33,7 +33,6 @@ def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
         "claude",
         "--print", prompt,
         "--output-format", "json",
-        "--no-color",
     ]
     if session_id:
         cmd += ["--resume", session_id]
