@@ -15,8 +15,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Where Claude Code sessions are stored (same dir as this script by default)
-WORK_DIR = Path(__file__).parent
+# Directory Claude Code will run in (i.e. the project it works on)
+WORK_DIR = Path("~/git/buck").expanduser()
 
 
 def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
