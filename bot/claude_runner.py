@@ -33,6 +33,7 @@ def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
         "claude",
         "--print", prompt,
         "--output-format", "json",
+        "--disable-slash-commands",   # Prevents CLAUDE.md skills (e.g. /voicemode) from running on the server
     ]
     if session_id:
         cmd += ["--resume", session_id]
