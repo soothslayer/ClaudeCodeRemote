@@ -1,4 +1,5 @@
 import SwiftUI
+import VisionKit
 
 // MARK: - SettingsView
 // Accessed via long press. Intended for a sighted caregiver to configure
@@ -9,20 +10,29 @@ struct SettingsView: View {
     @AppStorage("serverURL") private var serverURL: String = ""
     @Environment(\.dismiss) private var dismiss
     @State private var urlDraft: String = ""
+    @State private var showingScanner = false
     @State private var showingConfirmation = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("http://your-ngrok-url.ngrok.io", text: $urlDraft)
+                    TextField("https://xxxx.ngrok-free.app", text: $urlDraft)
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+
+                    if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                        Button {
+                            showingScanner = true
+                        } label: {
+                            Label("Scan QR Code", systemImage: "qrcode.viewfinder")
+                        }
+                    }
                 } header: {
                     Text("Bot Server URL")
                 } footer: {
-                    Text("Enter the public URL of the Claude Code bot server running on your computer. Get this URL by running setup.sh in the bot/ directory.")
+                    Text("Paste the ngrok URL, or scan the QR code from http://localhost:8080/qr on the server computer.")
                         .font(.footnote)
                 }
 
@@ -55,6 +65,13 @@ struct SettingsView: View {
                 Button("OK") { dismiss() }
             } message: {
                 Text("Server URL has been saved. Return to the main screen and tap anywhere to start.")
+            }
+            .sheet(isPresented: $showingScanner) {
+                QRScannerView { url in
+                    urlDraft = url
+                    showingScanner = false
+                }
+                .ignoresSafeArea()
             }
             .onAppear {
                 urlDraft = serverURL
