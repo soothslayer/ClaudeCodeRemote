@@ -24,7 +24,6 @@ targets:
         NSMicrophoneUsageDescription: "Claude Code Remote needs your microphone to hear voice commands."
         NSSpeechRecognitionUsageDescription: "Claude Code Remote uses speech recognition to convert your voice to text for Claude Code."
         UIBackgroundModes:
-          - fetch
           - audio
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
