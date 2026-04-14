@@ -22,6 +22,7 @@ final class AppState: ObservableObject {
 
     @Published private(set) var voiceState: VoiceState = .idle
     @Published private(set) var statusMessage: String = ""
+    @Published private(set) var isRequestingPermissions = false
 
     let voiceManager: VoiceManager
     let apiService: APIService
@@ -40,13 +41,23 @@ final class AppState: ObservableObject {
     // MARK: - Entry point
 
     func onAppear() async {
-        guard await voiceManager.requestPermissions() else {
+        isRequestingPermissions = true
+        let granted = await voiceManager.requestPermissions()
+        isRequestingPermissions = false
+
+        guard granted else {
             let msg = "Permissions required. Please open Settings and allow microphone and speech recognition access, then restart the app."
             await transition(to: .error(msg))
-            await voiceManager.speak(msg)
+            // Don't try to speak — we may not have audio permissions yet.
+            // VoiceOver will read the accessibility label instead.
             return
         }
-        await greet()
+
+        // Stay in .idle and wait for a deliberate tap before touching the audio
+        // session. Attempting to speak immediately after permission dialogs dismiss
+        // can cause AVSpeechSynthesizer to silently fail due to audio session
+        // timing issues on first launch.
+        await transition(to: .idle)
     }
 
     // MARK: - Greeting
@@ -229,7 +240,7 @@ final class AppState: ObservableObject {
 extension VoiceState {
     var displayMessage: String {
         switch self {
-        case .idle:                return ""
+        case .idle:                return "Tap anywhere to start"
         case .speaking:            return "Speaking…"
         case .pausedSpeaking:      return "Paused — tap to resume"
         case .listeningForChoice:  return "Listening for your choice…"

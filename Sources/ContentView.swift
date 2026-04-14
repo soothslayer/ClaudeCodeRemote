@@ -31,10 +31,13 @@ struct ContentView: View {
         // Full-screen tap to respond
         .contentShape(Rectangle())
         .onTapGesture {
+            guard !appState.isRequestingPermissions else { return }
             Task { await appState.handleTap() }
         }
-        // Long press opens settings (for sighted caregiver to configure server URL)
+        // Long press opens settings — disabled while permission dialogs are on screen
+        // to prevent the dialog dismiss animation from accidentally triggering it.
         .onLongPressGesture(minimumDuration: 1.5) {
+            guard !appState.isRequestingPermissions else { return }
             showSettings = true
         }
         .sheet(isPresented: $showSettings) {
@@ -158,7 +161,7 @@ struct ContentView: View {
         case .processing:         return "Claude Code is processing your request. Please wait."
         case .waitingForInput:    return "Ready for your response. Double tap to speak."
         case .error(let msg):     return "Error: \(msg). Double tap to try again."
-        case .idle:               return "Claude Code Remote. Double tap to start."
+        case .idle:               return "Claude Code Remote. Ready. Double tap to start."
         }
     }
 }
