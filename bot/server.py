@@ -19,6 +19,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from claude_runner import run_claude
@@ -114,6 +115,52 @@ async def session_info():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/qr", response_class=HTMLResponse)
+async def qr_page():
+    """
+    Open http://localhost:8080/qr in a browser, paste the ngrok URL,
+    and a QR code appears for the blind user to scan with the iOS app.
+    """
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Code Remote — Server URL QR Code</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; text-align: center;
+           padding: 48px 24px; background: #111; color: #eee; }
+    h1   { font-size: 1.4rem; margin-bottom: 8px; }
+    p    { color: #aaa; margin-bottom: 24px; }
+    input { width: 420px; max-width: 90vw; padding: 12px; font-size: 16px;
+            border-radius: 8px; border: 1px solid #444; background: #222;
+            color: #eee; outline: none; }
+    input:focus { border-color: #0af; }
+    #canvas-wrap { margin-top: 32px; }
+    canvas { border-radius: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Claude Code Remote — Setup QR Code</h1>
+  <p>Paste the ngrok URL below. Show the QR code to your friend to scan in the app.</p>
+  <input id="url" type="url" placeholder="https://xxxx.ngrok-free.app"
+         oninput="update()" autocomplete="off" spellcheck="false">
+  <div id="canvas-wrap"><canvas id="qr"></canvas></div>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script>
+    function update() {
+      var val = document.getElementById('url').value.trim();
+      var canvas = document.getElementById('qr');
+      if (!val) { var ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); return; }
+      QRCode.toCanvas(canvas, val, { width: 320, margin: 2,
+        color: { dark: '#000000', light: '#ffffff' } }, function(){});
+    }
+  </script>
+</body>
+</html>""")
+
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

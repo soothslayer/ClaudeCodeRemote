@@ -23,6 +23,7 @@ targets:
         CFBundleVersion: "1"
         NSMicrophoneUsageDescription: "Claude Code Remote needs your microphone to hear voice commands."
         NSSpeechRecognitionUsageDescription: "Claude Code Remote uses speech recognition to convert your voice to text for Claude Code."
+        NSCameraUsageDescription: "Claude Code Remote uses the camera to scan QR codes for server URL setup."
         UIBackgroundModes:
           - audio
         NSAppTransportSecurity:
