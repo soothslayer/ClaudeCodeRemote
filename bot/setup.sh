@@ -47,10 +47,19 @@ echo ""
 if command -v ngrok &>/dev/null; then
     echo "ngrok found: $(ngrok version)"
 else
-    echo "ngrok not found. Install from https://ngrok.com/download"
-    echo "Then run: ngrok http 8080"
-    echo "Use the https:// URL it gives you as the Server URL in the iOS app settings."
+    echo "ngrok not found. Installing via Homebrew..."
+    if command -v brew &>/dev/null; then
+        brew install ngrok/ngrok/ngrok
+        echo "ngrok installed: $(ngrok version)"
+    else
+        echo "ERROR: Homebrew not found. Install ngrok manually: https://ngrok.com/download"
+        exit 1
+    fi
 fi
+echo ""
+echo ">>> If you haven't authenticated ngrok yet, run:"
+echo "      ngrok config add-authtoken <your-token>"
+echo "    Get your token at: https://dashboard.ngrok.com/get-started/your-authtoken"
 
 # ── 5. Login to Claude ───────────────────────────────────────────────────────
 echo ""

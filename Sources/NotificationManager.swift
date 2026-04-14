@@ -5,14 +5,11 @@ final class NotificationManager {
     static let shared = NotificationManager()
     private init() {}
 
-    // Request notification permission and register for remote notifications
+    // Request notification permission for local notifications
     @MainActor
     func requestPermission() async {
         let center = UNUserNotificationCenter.current()
-        let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
-        if granted {
-            UIApplication.shared.registerForRemoteNotifications()
-        }
+        _ = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
 
     // Show a local notification (used when app is backgrounded during background fetch)

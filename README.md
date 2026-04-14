@@ -44,7 +44,11 @@ ClaudeCodeRemote/
 ### Prerequisites
 - **Node.js** — for `claude` CLI: https://nodejs.org
 - **Python 3.11+**
-- **ngrok** — to expose the local server: https://ngrok.com/download
+- **ngrok** — to expose the local server:
+  ```bash
+  brew install ngrok/ngrok/ngrok
+  ngrok config add-authtoken <your-token>   # dashboard.ngrok.com/get-started/your-authtoken
+  ```
 
 ### Steps
 
