@@ -39,25 +39,28 @@ struct ContentView: View {
             Task { await appState.handleTap() }
         }
         // 0.8 s long press while processing → cancel.
-        // Sets longPressCancelled so the 1.5 s Settings gesture below won't
-        // also fire on the same hold.
-        .onLongPressGesture(minimumDuration: 0.8) {
-            guard !appState.isRequestingPermissions else { return }
-            guard appState.voiceState == .processing else { return }
-            longPressCancelled = true
-            appState.cancelProcessing()
-            // Clear flag after the 1.5 s window has safely passed.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                longPressCancelled = false
+        // Uses .simultaneousGesture so it doesn't block the 1.5 s settings press below.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.8).onEnded { _ in
+                guard !appState.isRequestingPermissions else { return }
+                guard appState.voiceState == .processing else { return }
+                longPressCancelled = true
+                appState.cancelProcessing()
+                // Clear flag after the 1.5 s window has safely passed.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    longPressCancelled = false
+                }
             }
-        }
-        // 1.5 s long press → open Settings (any state except processing,
-        // and not if we already fired the cancel gesture on this same hold).
-        .onLongPressGesture(minimumDuration: 1.5) {
-            guard !appState.isRequestingPermissions else { return }
-            guard !longPressCancelled else { return }
-            showSettings = true
-        }
+        )
+        // 1.5 s long press → open Settings.
+        // Also .simultaneousGesture so both presses coexist and neither cancels the other.
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 1.5).onEnded { _ in
+                guard !appState.isRequestingPermissions else { return }
+                guard !longPressCancelled else { return }
+                showSettings = true
+            }
+        )
         // Shake the phone → hard reset back to the greeting.
         // Shake is hardware-level and always reliable, which matters for blind users.
         .onShake {
