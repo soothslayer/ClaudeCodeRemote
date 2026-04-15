@@ -61,6 +61,10 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        // Handle magic setup links: clauderemote://setup?url=https://…
+        .onOpenURL { url in
+            Task { await appState.handleSetupLink(url) }
+        }
         // Kick off the greeting when the view appears
         .task {
             await appState.onAppear()

@@ -65,6 +65,31 @@ final class AppState: ObservableObject {
         await transition(to: .idle)
     }
 
+    // MARK: - Magic setup link
+
+    /// Handles clauderemote://setup?url=https://…
+    /// Saves the server URL and speaks a confirmation so the user doesn't need
+    /// to open Settings at all.
+    func handleSetupLink(_ url: URL) async {
+        guard url.scheme?.lowercased() == "clauderemote",
+              url.host?.lowercased() == "setup",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let serverURL = components.queryItems?.first(where: { $0.name == "url" })?.value,
+              !serverURL.isEmpty else {
+            AppLogger.shared.log("Ignored unrecognised deep link: \(url)", tag: "LINK")
+            return
+        }
+
+        UserDefaults.standard.set(serverURL, forKey: "serverURL")
+        AppLogger.shared.log("Server URL set via magic link: \(serverURL)", tag: "LINK")
+
+        // Speak confirmation regardless of current state so the user knows it worked
+        await voiceManager.speak("Server connected. You're all set. Tap anywhere to start.")
+
+        // If the app was idle (first launch), transition stays at .idle so one tap starts
+        // If the app was already running in another state, leave it as-is
+    }
+
     // MARK: - Greeting
 
     private func greet() async {
