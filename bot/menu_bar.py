@@ -67,8 +67,9 @@ class ClaudeRemoteApp(rumps.App):
             menu=[
                 rumps.MenuItem("Status: starting…"),
                 None,  # separator
-                rumps.MenuItem("Copy Magic Link", callback=self.copy_magic_link),
-                rumps.MenuItem("Open QR Page",    callback=self.open_qr_page),
+                rumps.MenuItem("Copy Magic Link",      callback=self.copy_magic_link),
+                rumps.MenuItem("Open QR Page",         callback=self.open_qr_page),
+                rumps.MenuItem("Open Activity Window", callback=self.open_activity),
                 None,  # separator
                 rumps.MenuItem("Quit", callback=self.quit_app),
             ],
@@ -122,6 +123,9 @@ class ClaudeRemoteApp(rumps.App):
 
     def open_qr_page(self, _sender):
         webbrowser.open(f"http://localhost:{PORT}/qr")
+
+    def open_activity(self, _sender):
+        webbrowser.open(f"http://localhost:{PORT}/activity")
 
     def quit_app(self, _sender):
         if self._ngrok_proc:

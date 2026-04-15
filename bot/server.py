@@ -19,10 +19,25 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from claude_runner import start_claude, collect_claude, kill_claude
+
+# ── Activity-window SSE broadcast ─────────────────────────────────────────────
+# Each connected /activity/stream client gets its own asyncio.Queue.
+# collect_claude runs in a thread and calls _broadcast() for every stdout line.
+
+_activity_clients: set[asyncio.Queue] = set()
+_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _broadcast(line: str) -> None:
+    """Thread-safe push of a raw Claude stdout line to all SSE clients."""
+    if _event_loop is None or not _activity_clients:
+        return
+    for q in list(_activity_clients):
+        _event_loop.call_soon_threadsafe(q.put_nowait, line)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 load_dotenv()
@@ -35,6 +50,8 @@ SESSION_FILE = Path(__file__).parent / "session.json"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _event_loop
+    _event_loop = asyncio.get_event_loop()
     yield
 
 app = FastAPI(title="Claude Code Remote", lifespan=lifespan)
@@ -90,7 +107,7 @@ async def _run_claude_cancellable(
     """
     loop = asyncio.get_event_loop()
     proc = start_claude(prompt, session_id)
-    fut = loop.run_in_executor(None, collect_claude, proc, session_id)
+    fut = loop.run_in_executor(None, collect_claude, proc, session_id, _broadcast)
 
     try:
         while not fut.done():
@@ -171,6 +188,181 @@ async def ngrok_url_endpoint():
     except Exception:
         pass
     return {"url": None}
+
+
+@app.get("/activity/stream")
+async def activity_stream(request: Request):
+    """
+    Server-Sent Events stream of every raw JSON line Claude Code emits.
+    The browser /activity page consumes this to render a live activity window.
+    """
+    q: asyncio.Queue = asyncio.Queue()
+    _activity_clients.add(q)
+    logger.info("Activity client connected (%d total)", len(_activity_clients))
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    line = await asyncio.wait_for(q.get(), timeout=15.0)
+                    # SSE format: "data: <payload>\n\n"
+                    yield f"data: {line}\n\n"
+                except asyncio.TimeoutError:
+                    # Keepalive ping so the connection stays open
+                    yield ": ping\n\n"
+        finally:
+            _activity_clients.discard(q)
+            logger.info("Activity client disconnected (%d remaining)", len(_activity_clients))
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/activity", response_class=HTMLResponse)
+async def activity_page():
+    """Live activity window — shows Claude Code thinking and responding in real time."""
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Code Remote — Activity</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'SF Mono', 'Fira Code', monospace;
+           font-size: 13px; line-height: 1.6; display: flex; flex-direction: column; height: 100vh; }
+    header { padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d;
+             display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    header h1 { font-size: 14px; font-weight: 600; color: #58a6ff; }
+    #status-dot { width: 10px; height: 10px; border-radius: 50%; background: #3fb950;
+                  box-shadow: 0 0 6px #3fb950; transition: background .3s; flex-shrink: 0; }
+    #status-dot.idle { background: #6e7681; box-shadow: none; }
+    #status-dot.working { background: #f0883e; box-shadow: 0 0 6px #f0883e;
+                          animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+    #status-text { color: #8b949e; font-size: 12px; }
+    #log { flex: 1; overflow-y: auto; padding: 16px 20px; }
+    .entry { margin-bottom: 14px; }
+    .ts { color: #484f58; font-size: 11px; margin-bottom: 2px; }
+    .bubble { padding: 8px 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+    .assistant .bubble { background: #1c2128; border-left: 3px solid #58a6ff; color: #e6edf3; }
+    .tool-use  .bubble { background: #161b22; border-left: 3px solid #f0883e; color: #ffa657; }
+    .tool-result .bubble { background: #161b22; border-left: 3px solid #3fb950; color: #7ee787; }
+    .result    .bubble { background: #1c2128; border-left: 3px solid #bc8cff; color: #d2a8ff;
+                         font-family: -apple-system, sans-serif; font-size: 13px; }
+    .error     .bubble { background: #1c1010; border-left: 3px solid #f85149; color: #f85149; }
+    .label { font-size: 11px; font-weight: 600; margin-bottom: 3px; opacity: .7; }
+    #empty { color: #484f58; text-align: center; margin-top: 80px; font-size: 13px; }
+    #clear-btn { margin-left: auto; padding: 4px 10px; background: #21262d; border: 1px solid #30363d;
+                 color: #8b949e; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    #clear-btn:hover { background: #30363d; color: #e6edf3; }
+  </style>
+</head>
+<body>
+  <header>
+    <div id="status-dot" class="idle"></div>
+    <h1>Claude Code Remote</h1>
+    <span id="status-text">Waiting for activity…</span>
+    <button id="clear-btn" onclick="clearLog()">Clear</button>
+  </header>
+  <div id="log"><div id="empty">No activity yet — waiting for the iOS app to send a prompt.</div></div>
+
+  <script>
+    var log = document.getElementById('log');
+    var dot = document.getElementById('status-dot');
+    var statusText = document.getElementById('status-text');
+    var empty = document.getElementById('empty');
+
+    function setStatus(state, text) {
+      dot.className = state;
+      statusText.textContent = text;
+    }
+
+    function ts() {
+      return new Date().toLocaleTimeString();
+    }
+
+    function append(cls, label, text) {
+      if (empty) { empty.remove(); empty = null; }
+      var entry = document.createElement('div');
+      entry.className = 'entry ' + cls;
+      entry.innerHTML =
+        '<div class="ts">' + ts() + '</div>' +
+        '<div class="label">' + label + '</div>' +
+        '<div class="bubble">' + escHtml(text) + '</div>';
+      log.appendChild(entry);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function clearLog() {
+      log.innerHTML = '<div id="empty">Log cleared.</div>';
+      empty = document.getElementById('empty');
+    }
+
+    function handleLine(raw) {
+      var obj;
+      try { obj = JSON.parse(raw); } catch(e) { return; }
+
+      var type = obj.type || '';
+
+      if (type === 'assistant') {
+        setStatus('working', 'Claude is responding…');
+        var content = (obj.message && obj.message.content) || [];
+        content.forEach(function(block) {
+          if (block.type === 'text' && block.text) {
+            append('assistant', '🤖 Claude', block.text.trim());
+          } else if (block.type === 'tool_use') {
+            var input = JSON.stringify(block.input || {}, null, 2);
+            append('tool-use', '🔧 Tool call: ' + block.name, input);
+          }
+        });
+      } else if (type === 'tool') {
+        setStatus('working', 'Running tool…');
+        var content = obj.content || [];
+        var parts = content.map(function(c) {
+          if (c.type === 'text') return c.text;
+          return JSON.stringify(c);
+        }).join('\\n');
+        if (parts.length > 1200) parts = parts.slice(0, 1200) + '\\n… (truncated)';
+        append('tool-result', '📤 Tool result', parts);
+      } else if (type === 'result') {
+        setStatus('idle', 'Done');
+        append('result', '✅ Final response', obj.result || '');
+      } else if (type === 'error') {
+        setStatus('idle', 'Error');
+        append('error', '❌ Error', obj.error || raw);
+      } else if (type === 'system' && obj.subtype === 'init') {
+        setStatus('working', 'Session started');
+        append('assistant', '⚡ Session init', 'tools: ' + ((obj.tools || []).map(function(t){ return t.name; }).join(', ') || '(none)'));
+      }
+    }
+
+    // Connect SSE
+    function connect() {
+      var es = new EventSource('/activity/stream');
+      es.onmessage = function(e) { handleLine(e.data); };
+      es.onerror = function() {
+        setStatus('idle', 'Reconnecting…');
+        es.close();
+        setTimeout(connect, 3000);
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>""")
 
 
 @app.get("/qr", response_class=HTMLResponse)
