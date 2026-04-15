@@ -12,6 +12,7 @@
 		387FDD5D29D33C53EEF2D61F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F1C021D81542D058CEE5B5 /* AppDelegate.swift */; };
 		4146788A4DDC3EB366BFF915 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4152E76DB509BBBBA65FD795 /* Assets.xcassets */; };
 		55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */; };
+		80886B1A62F3AD0D6E0307F6 /* ShakeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44AEB035CBD2593E1BC96A76 /* ShakeDetector.swift */; };
 		9C5A790062EA986FCAAE2EFF /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */; };
 		C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FD1885D55DC54CBB4EEB22 /* APIService.swift */; };
 		CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */; };
@@ -26,6 +27,7 @@
 		37063B2E799F980DF4C247A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		4152E76DB509BBBBA65FD795 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		44AEB035CBD2593E1BC96A76 /* ShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShakeDetector.swift; sourceTree = "<group>"; };
 		4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceManager.swift; sourceTree = "<group>"; };
 		4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7623456EF8908AB075269730 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
@@ -51,6 +53,7 @@
 				3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */,
 				7623456EF8908AB075269730 /* SessionManager.swift */,
 				4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */,
+				44AEB035CBD2593E1BC96A76 /* ShakeDetector.swift */,
 				4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */,
 			);
 			path = Sources;
@@ -152,6 +155,7 @@
 				9C5A790062EA986FCAAE2EFF /* QRScannerView.swift in Sources */,
 				17C86BB1CD340DBA3B760B98 /* SessionManager.swift in Sources */,
 				CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */,
+				80886B1A62F3AD0D6E0307F6 /* ShakeDetector.swift in Sources */,
 				0A6FC793DE1E37170D504773 /* VoiceManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

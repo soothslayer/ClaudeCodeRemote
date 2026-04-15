@@ -58,6 +58,12 @@ struct ContentView: View {
             guard !longPressCancelled else { return }
             showSettings = true
         }
+        // Shake the phone → hard reset back to the greeting.
+        // Shake is hardware-level and always reliable, which matters for blind users.
+        .onShake {
+            guard !appState.isRequestingPermissions else { return }
+            Task { await appState.resetToStart() }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
@@ -72,7 +78,7 @@ struct ContentView: View {
         // VoiceOver: entire screen is one element
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint("Double tap to respond with your voice")
+        .accessibilityHint("Double tap to respond with your voice. Shake the phone to start over.")
         .accessibilityAddTraits(.isButton)
     }
 

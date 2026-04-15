@@ -157,6 +157,22 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/ngrok-url")
+async def ngrok_url_endpoint():
+    """Return the current public ngrok HTTPS URL by querying the local ngrok API."""
+    import urllib.request as _ur
+    import json as _json
+    try:
+        with _ur.urlopen("http://localhost:4040/api/tunnels", timeout=2) as r:
+            data = _json.loads(r.read())
+        for tunnel in data.get("tunnels", []):
+            if tunnel.get("proto") == "https":
+                return {"url": tunnel["public_url"]}
+    except Exception:
+        pass
+    return {"url": None}
+
+
 @app.get("/qr", response_class=HTMLResponse)
 async def qr_page():
     """
@@ -254,6 +270,19 @@ async def qr_page():
       QRCode.toCanvas(canvas, magic, { width: 320, margin: 2,
         color: { dark: '#000000', light: '#ffffff' } }, function(){});
     }
+
+    // Auto-populate the URL field from the running ngrok tunnel (if any)
+    window.addEventListener('load', function() {
+      fetch('/ngrok-url')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.url) {
+            document.getElementById('url').value = data.url;
+            update();
+          }
+        })
+        .catch(function() {});  // silently ignore if server can't reach ngrok
+    });
 
     function copyLink() {
       var text = document.getElementById('magic-link').textContent;
