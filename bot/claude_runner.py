@@ -15,8 +15,14 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Directory Claude Code will run in (i.e. the project it works on)
-WORK_DIR = Path("~/git/buck").expanduser()
+# Directory Claude Code will run in (i.e. the project it works on).
+# Set CLAUDE_WORK_DIR in your environment or .env to override.
+import os as _os
+_work_dir_env = _os.environ.get("CLAUDE_WORK_DIR", "")
+WORK_DIR = Path(_work_dir_env).expanduser() if _work_dir_env else Path.home()
+if not WORK_DIR.exists():
+    logger.warning("WORK_DIR %s does not exist — falling back to home directory", WORK_DIR)
+    WORK_DIR = Path.home()
 
 # Path to our computer-use MCP server script
 _MCP_SERVER = Path(__file__).parent / "computer_use_mcp.py"
