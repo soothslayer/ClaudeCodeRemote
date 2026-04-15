@@ -168,34 +168,99 @@ async def qr_page():
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Claude Code Remote — Server URL QR Code</title>
+  <title>Claude Code Remote — Setup</title>
   <style>
     body { font-family: -apple-system, sans-serif; text-align: center;
-           padding: 48px 24px; background: #111; color: #eee; }
+           padding: 48px 24px; background: #111; color: #eee; max-width: 600px; margin: 0 auto; }
     h1   { font-size: 1.4rem; margin-bottom: 8px; }
     p    { color: #aaa; margin-bottom: 24px; }
-    input { width: 420px; max-width: 90vw; padding: 12px; font-size: 16px;
+    input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 16px;
             border-radius: 8px; border: 1px solid #444; background: #222;
             color: #eee; outline: none; }
     input:focus { border-color: #0af; }
-    #canvas-wrap { margin-top: 32px; }
+    .section { margin-top: 36px; text-align: left; }
+    .section h2 { font-size: 1rem; color: #0af; margin-bottom: 8px; }
+    .link-box { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .link-text { flex: 1; padding: 10px 12px; background: #1a1a2e; border: 1px solid #333;
+                 border-radius: 8px; font-size: 13px; color: #7af; word-break: break-all;
+                 min-height: 40px; }
+    button { padding: 10px 18px; background: #0af; color: #000; border: none;
+             border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+             white-space: nowrap; }
+    button:active { background: #08d; }
+    #canvas-wrap { margin-top: 16px; }
     canvas { border-radius: 12px; }
+    .hint { font-size: 12px; color: #666; margin-top: 8px; }
+    #status { height: 20px; color: #4c4; font-size: 13px; margin-top: 6px; }
   </style>
 </head>
 <body>
-  <h1>Claude Code Remote — Setup QR Code</h1>
-  <p>Paste the ngrok URL below. Show the QR code to your friend to scan in the app.</p>
+  <h1>Claude Code Remote — Setup</h1>
+  <p>Paste the ngrok URL to generate a magic link and QR code for your friend.</p>
+
   <input id="url" type="url" placeholder="https://xxxx.ngrok-free.app"
          oninput="update()" autocomplete="off" spellcheck="false">
-  <div id="canvas-wrap"><canvas id="qr"></canvas></div>
+  <div id="status"></div>
+
+  <!-- Magic link section -->
+  <div class="section" id="link-section" style="display:none">
+    <h2>📱 Magic Link — easiest for blind users</h2>
+    <p style="font-size:13px;color:#aaa;margin-bottom:4px">
+      Text this link to your friend. Tapping it opens the app and connects automatically — no Settings needed.
+    </p>
+    <div class="link-box">
+      <div class="link-text" id="magic-link"></div>
+      <button onclick="copyLink()">Copy</button>
+    </div>
+    <p class="hint">Works in iMessage, WhatsApp, email, etc.</p>
+  </div>
+
+  <!-- QR code section -->
+  <div class="section" id="qr-section" style="display:none">
+    <h2>📷 QR Code — for users who can scan</h2>
+    <p style="font-size:13px;color:#aaa;margin-bottom:4px">
+      Show this QR code or let them scan it with the app's built-in scanner (long press → Settings → Scan QR Code).
+    </p>
+    <div id="canvas-wrap"><canvas id="qr"></canvas></div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
   <script>
     function update() {
       var val = document.getElementById('url').value.trim();
-      var canvas = document.getElementById('qr');
-      if (!val) { var ctx = canvas.getContext('2d'); ctx.clearRect(0,0,canvas.width,canvas.height); return; }
-      QRCode.toCanvas(canvas, val, { width: 320, margin: 2,
+      var linkSection = document.getElementById('link-section');
+      var qrSection   = document.getElementById('qr-section');
+      var magicEl     = document.getElementById('magic-link');
+      var status      = document.getElementById('status');
+      var canvas      = document.getElementById('qr');
+
+      if (!val || !val.startsWith('http')) {
+        linkSection.style.display = 'none';
+        qrSection.style.display   = 'none';
+        status.textContent = '';
+        var ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+
+      // Build magic link
+      var magic = 'clauderemote://setup?url=' + encodeURIComponent(val);
+      magicEl.textContent = magic;
+      linkSection.style.display = 'block';
+      qrSection.style.display   = 'block';
+      status.textContent = '✓ Ready';
+
+      // QR code encodes the magic link so scanning it also auto-connects
+      QRCode.toCanvas(canvas, magic, { width: 320, margin: 2,
         color: { dark: '#000000', light: '#ffffff' } }, function(){});
+    }
+
+    function copyLink() {
+      var text = document.getElementById('magic-link').textContent;
+      navigator.clipboard.writeText(text).then(function() {
+        document.getElementById('status').textContent = '✓ Copied to clipboard!';
+        setTimeout(function(){ document.getElementById('status').textContent = '✓ Ready'; }, 2000);
+      });
     }
   </script>
 </body>

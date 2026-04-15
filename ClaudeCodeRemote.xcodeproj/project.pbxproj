@@ -12,27 +12,28 @@
 		387FDD5D29D33C53EEF2D61F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F1C021D81542D058CEE5B5 /* AppDelegate.swift */; };
 		4146788A4DDC3EB366BFF915 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4152E76DB509BBBBA65FD795 /* Assets.xcassets */; };
 		55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */; };
-		91BAF8071D070281BA59AD46 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FDFF5732D5541988C1E70FB /* NotificationManager.swift */; };
+		9C5A790062EA986FCAAE2EFF /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */; };
 		C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FD1885D55DC54CBB4EEB22 /* APIService.swift */; };
 		CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */; };
+		DA8E807E942F28E852713AF5 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */; };
 		EA7AA888D38D61E7A9EA0CA4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF3F705E5374E00BF6CEBFCE /* ContentView.swift */; };
 		F9D1F93E0F36AC02324C259B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		12F1C021D81542D058CEE5B5 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		2FDFF5732D5541988C1E70FB /* NotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationManager.swift; sourceTree = "<group>"; };
 		30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeRemoteApp.swift; sourceTree = "<group>"; };
 		37063B2E799F980DF4C247A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		4152E76DB509BBBBA65FD795 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceManager.swift; sourceTree = "<group>"; };
 		4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7623456EF8908AB075269730 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		77FD1885D55DC54CBB4EEB22 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
 		ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
-		C283A8DDA97ACA3ED9020F75 /* ClaudeCodeRemote.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ClaudeCodeRemote.entitlements; sourceTree = "<group>"; };
 		CF3F705E5374E00BF6CEBFCE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ClaudeCodeRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -41,13 +42,13 @@
 			children = (
 				77FD1885D55DC54CBB4EEB22 /* APIService.swift */,
 				12F1C021D81542D058CEE5B5 /* AppDelegate.swift */,
+				ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */,
 				ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */,
 				4152E76DB509BBBBA65FD795 /* Assets.xcassets */,
-				C283A8DDA97ACA3ED9020F75 /* ClaudeCodeRemote.entitlements */,
 				30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */,
 				CF3F705E5374E00BF6CEBFCE /* ContentView.swift */,
 				37063B2E799F980DF4C247A1 /* Info.plist */,
-				2FDFF5732D5541988C1E70FB /* NotificationManager.swift */,
+				3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */,
 				7623456EF8908AB075269730 /* SessionManager.swift */,
 				4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */,
 				4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */,
@@ -102,7 +103,7 @@
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
 					F34CCBF3D3A88101047D3B08 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = KUGPEZH97N;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -144,10 +145,11 @@
 			files = (
 				C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */,
 				387FDD5D29D33C53EEF2D61F /* AppDelegate.swift in Sources */,
+				DA8E807E942F28E852713AF5 /* AppLogger.swift in Sources */,
 				F9D1F93E0F36AC02324C259B /* AppState.swift in Sources */,
 				55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */,
 				EA7AA888D38D61E7A9EA0CA4 /* ContentView.swift in Sources */,
-				91BAF8071D070281BA59AD46 /* NotificationManager.swift in Sources */,
+				9C5A790062EA986FCAAE2EFF /* QRScannerView.swift in Sources */,
 				17C86BB1CD340DBA3B760B98 /* SessionManager.swift in Sources */,
 				CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */,
 				0A6FC793DE1E37170D504773 /* VoiceManager.swift in Sources */,
@@ -224,10 +226,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Sources/ClaudeCodeRemote.entitlements;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = KUGPEZH97N;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -246,10 +248,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Sources/ClaudeCodeRemote.entitlements;
+				CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = KUGPEZH97N;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Sources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

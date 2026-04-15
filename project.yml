@@ -39,6 +39,10 @@ targets:
           UISceneConfigurations: {}
         UIUserInterfaceStyle: Dark
         ITSAppUsesNonExemptEncryption: false
+        CFBundleURLTypes:
+          - CFBundleURLName: com.claudecoderemote.setup
+            CFBundleURLSchemes:
+              - clauderemote
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.claudecoderemote.app
