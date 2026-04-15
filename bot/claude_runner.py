@@ -80,11 +80,7 @@ def collect_claude(proc: subprocess.Popen, session_id: str | None) -> tuple[str,
 
     Raises RuntimeError on non-zero exit.
     """
-    try:
-        stdout, stderr = proc.communicate(timeout=300)   # 5-minute hard cap
-    except subprocess.TimeoutExpired:
-        kill_claude(proc)
-        raise RuntimeError("Claude Code timed out after 5 minutes.")
+    stdout, stderr = proc.communicate()   # no timeout — let Claude run as long as needed
 
     if proc.returncode != 0:
         err = stderr.strip()

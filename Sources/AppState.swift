@@ -159,18 +159,41 @@ final class AppState: ObservableObject {
 
         await voiceManager.speak("Got it. Sending to Claude Code now.")
 
+        // Periodic check-in task — two purposes:
+        //  1. Speaks aloud so the user knows work is still in progress
+        //  2. Keeps the AVAudioSession active so iOS doesn't suspend the app
+        //     when the user backgrounds it (UIBackgroundModes: [audio])
+        let checkInTask = Task { @MainActor [weak self] in
+            let intervals: [UInt64] = [
+                90_000_000_000,   // first check-in after 90 s
+                120_000_000_000,  // then every 2 min
+            ]
+            var iteration = 0
+            while true {
+                let delay = iteration < intervals.count ? intervals[iteration] : intervals.last!
+                do { try await Task.sleep(nanoseconds: delay) } catch { return }
+                guard let self, !Task.isCancelled, voiceState == .processing else { return }
+                let elapsed = iteration == 0 ? "a minute and a half" : "\(Int((iteration + 1) * 2)) minutes"
+                await voiceManager.speak("Still working, \(elapsed) in.")
+                iteration += 1
+            }
+        }
+
         do {
             let (sessionId, response) = try await task.value
+            checkInTask.cancel()
             currentApiTask = nil
             // Guard: cancelProcessing() may have already moved us out of .processing
             guard voiceState == .processing else { return }
             sessionManager.saveSession(id: sessionId)
             await handleIncomingResponse(response)
         } catch is CancellationError {
+            checkInTask.cancel()
             currentApiTask = nil
             AppLogger.shared.log("API task cancelled by user", tag: "API")
             // cancelProcessing() already updated the UI synchronously; nothing else needed.
         } catch {
+            checkInTask.cancel()
             currentApiTask = nil
             guard voiceState == .processing else { return }
             let msg = errorMessage(for: error)

@@ -47,8 +47,10 @@ final class APIService {
 
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest  = 300   // 5 min — Claude Code can be slow
-        config.timeoutIntervalForResource = 360
+        // No request timeout — Claude Code tasks can run for many minutes.
+        // The app uses periodic audio check-ins to stay alive in the background.
+        config.timeoutIntervalForRequest  = 3600  // 1 hour ceiling
+        config.timeoutIntervalForResource = 3600
         return URLSession(configuration: config)
     }()
 
