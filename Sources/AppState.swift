@@ -45,6 +45,7 @@ final class AppState: ObservableObject {
 
     func onAppear() async {
         let log = AppLogger.shared
+        print("start")
         log.log("onAppear start", tag: "INIT")
 
         isRequestingPermissions = true
@@ -142,9 +143,9 @@ final class AppState: ObservableObject {
         }
 
         await transition(to: .processing)
-        await voiceManager.speak("Got it. Sending to Claude Code now.")
 
-        // Wrap the API call in a stored Task so double-tap can cancel it.
+        // Create and store the task BEFORE speaking so cancelProcessing()
+        // can cancel it even if called during the "Got it" confirmation speech.
         let task = Task<(String, String), Error> {
             if let sessionId = self.sessionManager.lastSessionId {
                 let r = try await self.apiService.sendMessage(sessionId: sessionId, prompt: text)
@@ -156,18 +157,22 @@ final class AppState: ObservableObject {
         }
         currentApiTask = task
 
+        await voiceManager.speak("Got it. Sending to Claude Code now.")
+
         do {
             let (sessionId, response) = try await task.value
             currentApiTask = nil
+            // Guard: cancelProcessing() may have already moved us out of .processing
+            guard voiceState == .processing else { return }
             sessionManager.saveSession(id: sessionId)
             await handleIncomingResponse(response)
         } catch is CancellationError {
             currentApiTask = nil
             AppLogger.shared.log("API task cancelled by user", tag: "API")
-            await voiceManager.speak("Cancelled. Tap anywhere to speak.")
-            await transition(to: .waitingForInput)
+            // cancelProcessing() already updated the UI synchronously; nothing else needed.
         } catch {
             currentApiTask = nil
+            guard voiceState == .processing else { return }
             let msg = errorMessage(for: error)
             await transition(to: .error(msg))
             await voiceManager.speak("Error: \(msg). Tap anywhere to try again.")
@@ -236,7 +241,24 @@ final class AppState: ObservableObject {
     func cancelProcessing() {
         guard voiceState == .processing else { return }
         AppLogger.shared.log("cancelProcessing() called", tag: "API")
+
+        // Cancel the network task (may be nil if we're still in the "Got it" speech).
         currentApiTask?.cancel()
+        currentApiTask = nil
+
+        // Stop any in-progress TTS so we don't keep speaking over the cancellation.
+        voiceManager.stopSpeaking()
+
+        // Update UI synchronously — this is what was missing. The catch block in
+        // listenAndSend() won't update state because it now relies on this path.
+        voiceState = .waitingForInput
+        statusMessage = VoiceState.waitingForInput.displayMessage
+
+        // Speak the confirmation on an async task (can't await from a sync func).
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await voiceManager.speak("Cancelled. Tap anywhere to speak.")
+        }
     }
 
     // MARK: - Helpers
