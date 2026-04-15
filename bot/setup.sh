@@ -21,7 +21,18 @@ echo "Installing dependencies..."
 pip install -q --upgrade pip
 pip install -q -r requirements.txt
 
-# ── 2. Claude Code CLI ───────────────────────────────────────────────────────
+# ── 2. cliclick (mouse/keyboard automation) ──────────────────────────────────
+if ! command -v cliclick &>/dev/null; then
+    echo ""
+    echo "Installing cliclick (mouse & keyboard automation for computer-use)..."
+    if command -v brew &>/dev/null; then
+        brew install cliclick
+    else
+        echo "WARNING: Homebrew not found — skipping cliclick. Mouse/keyboard computer-use tools will not work."
+    fi
+fi
+
+# ── 4. Claude Code CLI ───────────────────────────────────────────────────────
 if ! command -v claude &>/dev/null; then
     echo ""
     echo "Claude Code CLI not found. Installing..."
@@ -34,7 +45,7 @@ if ! command -v claude &>/dev/null; then
 fi
 echo "Claude Code CLI: $(claude --version 2>/dev/null || echo 'installed')"
 
-# ── 3. .env file ─────────────────────────────────────────────────────────────
+# ── 5. .env file ─────────────────────────────────────────────────────────────
 if [ ! -f .env ]; then
     cp .env.example .env
     echo ""
@@ -42,7 +53,7 @@ if [ ! -f .env ]; then
     echo ">>> Open bot/.env and add your TELEGRAM_BOT_TOKEN (optional but recommended)."
 fi
 
-# ── 4. ngrok ────────────────────────────────────────────────────────────────
+# ── 6. ngrok ────────────────────────────────────────────────────────────────
 echo ""
 if command -v ngrok &>/dev/null; then
     echo "ngrok found: $(ngrok version)"
@@ -61,14 +72,20 @@ echo ">>> If you haven't authenticated ngrok yet, run:"
 echo "      ngrok config add-authtoken <your-token>"
 echo "    Get your token at: https://dashboard.ngrok.com/get-started/your-authtoken"
 
-# ── 5. Login to Claude ───────────────────────────────────────────────────────
+# ── 7. Login to Claude ───────────────────────────────────────────────────────
 echo ""
 echo "If you haven't already, log in to Claude Code:"
 echo "  claude login"
 echo ""
 
-# ── 6. Start server ──────────────────────────────────────────────────────────
+# ── 8. Start server ──────────────────────────────────────────────────────────
 echo "=== Setup complete! ==="
+echo ""
+echo "IMPORTANT — macOS permissions needed for computer-use (screenshot/click/type):"
+echo "  Open System Settings → Privacy & Security → Screen Recording"
+echo "  → Enable Terminal (or whichever app you use to start the bot)"
+echo "  Open System Settings → Privacy & Security → Accessibility"
+echo "  → Enable Terminal (needed for keyboard/mouse automation)"
 echo ""
 echo "To start the server:"
 echo "  1. In one terminal:   source .venv/bin/activate && python server.py"
