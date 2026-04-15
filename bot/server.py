@@ -91,6 +91,10 @@ class MessageRequest(BaseModel):
     prompt: str
 
 
+class ActivitySendRequest(BaseModel):
+    prompt: str
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 async def _run_claude_cancellable(
@@ -133,6 +137,7 @@ async def _run_claude_cancellable(
 async def new_session(req: NewSessionRequest, request: Request):
     """Start a fresh Claude Code session."""
     logger.info("New session: %s…", req.prompt[:80])
+    _broadcast(json.dumps({"type": "user", "text": req.prompt, "source": "ios"}))
     try:
         response, session_id = await _run_claude_cancellable(request, req.prompt, None)
     except HTTPException:
@@ -148,6 +153,7 @@ async def new_session(req: NewSessionRequest, request: Request):
 async def send_message_endpoint(req: MessageRequest, request: Request):
     """Send a follow-up message in an existing session."""
     logger.info("Message in session %s: %s…", req.session_id, req.prompt[:80])
+    _broadcast(json.dumps({"type": "user", "text": req.prompt, "source": "ios"}))
     try:
         response, session_id = await _run_claude_cancellable(request, req.prompt, req.session_id)
     except HTTPException:
@@ -157,6 +163,24 @@ async def send_message_endpoint(req: MessageRequest, request: Request):
 
     save_session(session_id, response)
     return {"session_id": session_id, "response": response}
+
+
+@app.post("/activity/send")
+async def activity_send(req: ActivitySendRequest, request: Request):
+    """Send a message to Claude directly from the activity window browser tab."""
+    data = load_session()
+    session_id = data.get("session_id")  # None → starts a new session
+    logger.info("Activity send (session=%s): %s…", session_id, req.prompt[:80])
+    _broadcast(json.dumps({"type": "user", "text": req.prompt, "source": "operator"}))
+    try:
+        response, new_session_id = await _run_claude_cancellable(request, req.prompt, session_id)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    save_session(new_session_id, response)
+    return {"session_id": new_session_id, "response": response}
 
 
 @app.get("/session/info")
@@ -253,17 +277,29 @@ async def activity_page():
     .entry { margin-bottom: 14px; }
     .ts { color: #484f58; font-size: 11px; margin-bottom: 2px; }
     .bubble { padding: 8px 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
-    .assistant .bubble { background: #1c2128; border-left: 3px solid #58a6ff; color: #e6edf3; }
-    .tool-use  .bubble { background: #161b22; border-left: 3px solid #f0883e; color: #ffa657; }
-    .tool-result .bubble { background: #161b22; border-left: 3px solid #3fb950; color: #7ee787; }
-    .result    .bubble { background: #1c2128; border-left: 3px solid #bc8cff; color: #d2a8ff;
-                         font-family: -apple-system, sans-serif; font-size: 13px; }
-    .error     .bubble { background: #1c1010; border-left: 3px solid #f85149; color: #f85149; }
+    .assistant    .bubble { background: #1c2128; border-left: 3px solid #58a6ff; color: #e6edf3; }
+    .tool-use     .bubble { background: #161b22; border-left: 3px solid #f0883e; color: #ffa657; }
+    .tool-result  .bubble { background: #161b22; border-left: 3px solid #3fb950; color: #7ee787; }
+    .result       .bubble { background: #1c2128; border-left: 3px solid #bc8cff; color: #d2a8ff;
+                            font-family: -apple-system, sans-serif; font-size: 13px; }
+    .error        .bubble { background: #1c1010; border-left: 3px solid #f85149; color: #f85149; }
+    .user-ios     .bubble { background: #0d2b1a; border-left: 3px solid #3fb950; color: #7ee787; }
+    .user-operator .bubble { background: #0d1f2e; border-left: 3px solid #58a6ff; color: #79c0ff; }
     .label { font-size: 11px; font-weight: 600; margin-bottom: 3px; opacity: .7; }
     #empty { color: #484f58; text-align: center; margin-top: 80px; font-size: 13px; }
     #clear-btn { margin-left: auto; padding: 4px 10px; background: #21262d; border: 1px solid #30363d;
                  color: #8b949e; border-radius: 6px; cursor: pointer; font-size: 12px; }
     #clear-btn:hover { background: #30363d; color: #e6edf3; }
+    #send-bar { padding: 12px 20px; background: #161b22; border-top: 1px solid #30363d;
+                display: flex; gap: 10px; flex-shrink: 0; align-items: flex-end; }
+    #send-input { flex: 1; padding: 8px 12px; background: #0d1117; border: 1px solid #30363d;
+                  border-radius: 8px; color: #e6edf3; font-family: inherit; font-size: 13px;
+                  resize: none; min-height: 38px; max-height: 120px; outline: none; }
+    #send-input:focus { border-color: #58a6ff; }
+    #send-btn { padding: 8px 18px; background: #238636; border: none; border-radius: 8px;
+                color: #fff; font-weight: 600; cursor: pointer; white-space: nowrap; height: 38px; }
+    #send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+    #send-btn:not(:disabled):hover { background: #2ea043; }
   </style>
 </head>
 <body>
@@ -273,13 +309,19 @@ async def activity_page():
     <span id="status-text">Waiting for activity…</span>
     <button id="clear-btn" onclick="clearLog()">Clear</button>
   </header>
-  <div id="log"><div id="empty">No activity yet — waiting for the iOS app to send a prompt.</div></div>
+  <div id="log"><div id="empty">No activity yet — waiting for a prompt from the iOS app or type below.</div></div>
+  <div id="send-bar">
+    <textarea id="send-input" placeholder="Type a message to Claude… (Enter to send, Shift+Enter for newline)"
+              onkeydown="handleKey(event)" rows="1"></textarea>
+    <button id="send-btn" onclick="sendMessage()">Send</button>
+  </div>
 
   <script>
     var log = document.getElementById('log');
     var dot = document.getElementById('status-dot');
     var statusText = document.getElementById('status-text');
     var empty = document.getElementById('empty');
+    var isSending = false;
 
     function setStatus(state, text) {
       dot.className = state;
@@ -317,7 +359,12 @@ async def activity_page():
 
       var type = obj.type || '';
 
-      if (type === 'assistant') {
+      if (type === 'user') {
+        var cls   = obj.source === 'operator' ? 'user-operator' : 'user-ios';
+        var label = obj.source === 'operator' ? '🧑\u200d💻 You (browser)' : '📱 Friend (iOS)';
+        append(cls, label, obj.text || '');
+        setStatus('working', 'Claude is thinking…');
+      } else if (type === 'assistant') {
         setStatus('working', 'Claude is responding…');
         var content = (obj.message && obj.message.content) || [];
         content.forEach(function(block) {
@@ -349,7 +396,37 @@ async def activity_page():
       }
     }
 
-    // Connect SSE
+    // ── Send from browser ──────────────────────────────────────────────────────
+
+    function handleKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    }
+
+    function sendMessage() {
+      var input = document.getElementById('send-input');
+      var btn   = document.getElementById('send-btn');
+      var text  = input.value.trim();
+      if (!text || isSending) return;
+
+      isSending = true;
+      btn.disabled = true;
+      input.value = '';
+      input.style.height = '';
+
+      fetch('/activity/send', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({prompt: text})
+      })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.detail || r.statusText); });
+      })
+      .catch(function(err) { append('error', '❌ Send error', String(err)); })
+      .finally(function() { isSending = false; btn.disabled = false; input.focus(); });
+    }
+
+    // ── SSE connection ─────────────────────────────────────────────────────────
+
     function connect() {
       var es = new EventSource('/activity/stream');
       es.onmessage = function(e) { handleLine(e.data); };
