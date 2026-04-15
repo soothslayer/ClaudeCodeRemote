@@ -13,6 +13,7 @@ import subprocess
 import json
 import uuid
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -73,20 +74,41 @@ def start_claude(prompt: str, session_id: str | None = None) -> subprocess.Popen
     )
 
 
-def collect_claude(proc: subprocess.Popen, session_id: str | None) -> tuple[str, str]:
+def collect_claude(
+    proc: subprocess.Popen,
+    session_id: str | None,
+    on_line: "Callable[[str], None] | None" = None,
+) -> tuple[str, str]:
     """
     Block until the Claude subprocess finishes and return (response, session_id).
     Call this from a thread (asyncio.to_thread / run_in_executor).
 
+    on_line: optional callback invoked with each raw stdout line as it arrives.
+             Used by the activity-window SSE broadcast (thread-safe caller's
+             responsibility).
+
     Raises RuntimeError on non-zero exit.
     """
-    stdout, stderr = proc.communicate()   # no timeout — let Claude run as long as needed
+    stdout_lines: list[str] = []
+
+    # Read stdout line-by-line so on_line gets called in real time.
+    for raw_line in proc.stdout:                        # type: ignore[union-attr]
+        line = raw_line.rstrip("\n")
+        stdout_lines.append(line)
+        if on_line and line.strip():
+            try:
+                on_line(line)
+            except Exception:
+                pass   # never let a broadcast error kill the collection loop
+
+    # Drain stderr (non-blocking after stdout EOF)
+    _, stderr = proc.communicate()
 
     if proc.returncode != 0:
-        err = stderr.strip()
+        err = (stderr or "").strip()
         raise RuntimeError(f"Claude Code exited {proc.returncode}: {err or 'no error output'}")
 
-    return _parse_output(stdout, session_id)
+    return _parse_output("\n".join(stdout_lines), session_id)
 
 
 def kill_claude(proc: subprocess.Popen) -> None:
