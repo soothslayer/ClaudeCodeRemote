@@ -7,6 +7,8 @@ Requires the `claude` CLI to be installed and authenticated:
     claude login
 """
 
+import os
+import signal
 import subprocess
 import json
 import uuid
@@ -39,15 +41,16 @@ _MCP_CONFIG = json.dumps({
 })
 
 
-def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
+def start_claude(prompt: str, session_id: str | None = None) -> subprocess.Popen:
     """
-    Run Claude Code non-interactively with computer-use MCP tools available.
+    Launch Claude Code as a non-blocking subprocess.
 
-    Returns:
-        (response_text, session_id)  — session_id may be new or the same one passed in.
+    The caller is responsible for waiting on the process (via collect_claude)
+    or killing it (via kill_claude) when the client disconnects.
 
-    Raises:
-        RuntimeError if Claude Code exits with an error.
+    start_new_session=True gives the child its own process group so that
+    kill_claude can SIGTERM the whole tree (claude + MCP server sidecar)
+    without affecting this server process.
     """
     cmd = [
         "claude",
@@ -59,24 +62,60 @@ def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
     if session_id:
         cmd += ["--resume", session_id]
 
-    logger.info("Running claude: session=%s prompt_len=%d", session_id, len(prompt))
+    logger.info("Starting claude: session=%s prompt_len=%d", session_id, len(prompt))
+    return subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(WORK_DIR),
+        start_new_session=True,   # own process group → safe to kill tree
+    )
 
+
+def collect_claude(proc: subprocess.Popen, session_id: str | None) -> tuple[str, str]:
+    """
+    Block until the Claude subprocess finishes and return (response, session_id).
+    Call this from a thread (asyncio.to_thread / run_in_executor).
+
+    Raises RuntimeError on non-zero exit.
+    """
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,          # 5-minute hard cap
-            cwd=str(WORK_DIR),
-        )
+        stdout, stderr = proc.communicate(timeout=300)   # 5-minute hard cap
     except subprocess.TimeoutExpired:
+        kill_claude(proc)
         raise RuntimeError("Claude Code timed out after 5 minutes.")
 
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        raise RuntimeError(f"Claude Code exited {result.returncode}: {stderr or 'no error output'}")
+    if proc.returncode != 0:
+        err = stderr.strip()
+        raise RuntimeError(f"Claude Code exited {proc.returncode}: {err or 'no error output'}")
 
-    return _parse_output(result.stdout, session_id)
+    return _parse_output(stdout, session_id)
+
+
+def kill_claude(proc: subprocess.Popen) -> None:
+    """
+    Kill the Claude subprocess tree (claude binary + MCP server sidecar).
+    Safe to call even if the process has already exited.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        logger.info("Sent SIGTERM to claude process group (pid=%d)", proc.pid)
+    except (ProcessLookupError, PermissionError):
+        pass   # already dead
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            pass
+
+
+# Kept for any callers that don't need cancellation support.
+def run_claude(prompt: str, session_id: str | None = None) -> tuple[str, str]:
+    proc = start_claude(prompt, session_id)
+    return collect_claude(proc, session_id)
 
 
 def _parse_output(raw: str, fallback_session_id: str | None) -> tuple[str, str]:
