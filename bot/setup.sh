@@ -78,19 +78,76 @@ echo "If you haven't already, log in to Claude Code:"
 echo "  claude login"
 echo ""
 
-# ── 8. Start server ──────────────────────────────────────────────────────────
+# ── 8. Menu bar app — install as a login item via LaunchAgent ────────────────
+echo ""
+echo "Installing Claude Code Remote as a login-startup menu bar app…"
+
+PLIST_LABEL="com.claudecoderemote.menubar"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+PLIST_PATH="$PLIST_DIR/$PLIST_LABEL.plist"
+LOG_DIR="$HOME/Library/Logs"
+VENV_PYTHON="$(pwd)/.venv/bin/python3"
+MENU_BAR_PY="$(pwd)/menu_bar.py"
+
+mkdir -p "$PLIST_DIR" "$LOG_DIR"
+
+# Unload any previous version (idempotent)
+launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || true
+
+cat > "$PLIST_PATH" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$PLIST_LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$VENV_PYTHON</string>
+    <string>$MENU_BAR_PY</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$LOG_DIR/claude_remote.log</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG_DIR/claude_remote_err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
+PLIST_EOF
+
+launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+echo "Menu bar app loaded. Look for ☁ in your menu bar (may take a few seconds)."
+
+# ── 9. Done ───────────────────────────────────────────────────────────────────
+echo ""
 echo "=== Setup complete! ==="
 echo ""
 echo "IMPORTANT — macOS permissions needed for computer-use (screenshot/click/type):"
 echo "  Open System Settings → Privacy & Security → Screen Recording"
-echo "  → Enable Terminal (or whichever app you use to start the bot)"
+echo "  → Enable the menu bar app's Python process (or Terminal if prompted)"
 echo "  Open System Settings → Privacy & Security → Accessibility"
-echo "  → Enable Terminal (needed for keyboard/mouse automation)"
+echo "  → Enable the same Python process (needed for keyboard/mouse automation)"
 echo ""
-echo "To start the server:"
-echo "  1. In one terminal:   source .venv/bin/activate && python server.py"
-echo "  2. In another:        ngrok http 8080"
-echo "  3. Copy the ngrok https:// URL into the iOS app (long press the main screen → Settings)"
+echo "The Claude Code Remote server and ngrok start automatically at every login."
+echo ""
+echo "To share with your friend:"
+echo "  1. Click the ☁ (or ☁✓) icon in your menu bar"
+echo "  2. Click 'Copy Magic Link'"
+echo "  3. Paste it into iMessage / WhatsApp and send it to them"
+echo "  4. They tap the link on their iPhone — the app connects automatically"
+echo ""
+echo "To view logs:   tail -f ~/Library/Logs/claude_remote.log"
+echo "To stop:        launchctl bootout gui/\$(id -u)/com.claudecoderemote.menubar"
+echo "To restart:     launchctl kickstart gui/\$(id -u)/com.claudecoderemote.menubar"
 echo ""
 echo "To receive Telegram push notifications:"
 echo "  1. Create a Telegram bot via @BotFather and add the token to bot/.env"
