@@ -36,6 +36,10 @@ struct SessionInfoResult: Codable {
     let pendingResponse: String?  // Set by server if a response arrived while iOS was backgrounded
 }
 
+struct SettingsResult: Codable {
+    let workDir: String
+}
+
 // MARK: - APIService
 
 final class APIService {
@@ -68,6 +72,15 @@ final class APIService {
 
     func sessionInfo() async throws -> SessionInfoResult {
         return try await get(path: "/session/info")
+    }
+
+    func getSettings() async throws -> SettingsResult {
+        return try await get(path: "/settings")
+    }
+
+    func updateSettings(workDir: String) async throws -> SettingsResult {
+        let body: [String: String] = ["work_dir": workDir]
+        return try await post(path: "/settings", body: body)
     }
 
     // MARK: - HTTP helpers
