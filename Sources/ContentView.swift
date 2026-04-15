@@ -30,13 +30,17 @@ struct ContentView: View {
         }
         // Full-screen tap to respond
         .contentShape(Rectangle())
-        // Triple-tap cancels an in-progress Claude Code request
-        .onTapGesture(count: 3) {
+        // Double-tap cancels an in-progress Claude Code request.
+        // Must be listed before single-tap so SwiftUI gives it priority.
+        .onTapGesture(count: 2) {
             guard !appState.isRequestingPermissions else { return }
             appState.cancelProcessing()
         }
+        // Single-tap for everything else. During .processing this is a no-op
+        // so the double-tap above gets a clean shot without interference.
         .onTapGesture {
             guard !appState.isRequestingPermissions else { return }
+            guard appState.voiceState != .processing else { return }
             Task { await appState.handleTap() }
         }
         // Long press opens settings — disabled while permission dialogs are on screen
@@ -163,7 +167,7 @@ struct ContentView: View {
         case .listeningForChoice: return "Listening. Say new session or continue. Double tap to pause."
         case .listeningForPrompt: return "Listening for your message. Speak now. Double tap to pause."
         case .pausedListening:    return "Listening paused. Double tap to resume."
-        case .processing:         return "Claude Code is thinking. Triple tap to cancel."
+        case .processing:         return "Claude Code is thinking. Double tap to cancel."
         case .waitingForInput:    return "Ready for your response. Double tap to speak."
         case .error(let msg):     return "Error: \(msg). Double tap to try again."
         case .idle:               return "Claude Code Remote. Ready. Double tap to start."
