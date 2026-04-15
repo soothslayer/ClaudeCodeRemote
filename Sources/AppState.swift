@@ -286,6 +286,32 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Reset to start
+
+    /// Long-press (4 s) hard reset: cancels everything and restarts the greeting.
+    func resetToStart() async {
+        AppLogger.shared.log("resetToStart() called", tag: "RESET")
+
+        // Cancel any in-flight API call
+        currentApiTask?.cancel()
+        currentApiTask = nil
+
+        // Stop TTS and mic
+        voiceManager.stopSpeaking()
+        voiceManager.stopListening()
+
+        // Reset pause state
+        isPaused = false
+        pausedFromListeningState = .listeningForPrompt
+
+        // Brief announcement so the user knows the shake was recognised
+        await transition(to: .speaking)
+        await voiceManager.speak("Starting over.")
+
+        // Restart from the greeting
+        await greet()
+    }
+
     // MARK: - Cancel processing
 
     func cancelProcessing() {
