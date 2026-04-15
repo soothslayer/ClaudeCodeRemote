@@ -45,6 +45,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 SESSION_FILE = Path(__file__).parent / "session.json"
+CONFIG_FILE  = Path(__file__).parent / "config.json"
+
+DEFAULT_WORK_DIR = "~/git/buck"
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -61,6 +64,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Server config persistence ─────────────────────────────────────────────────
+
+def load_config() -> dict:
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text())
+        except Exception:
+            pass
+    return {"work_dir": DEFAULT_WORK_DIR}
+
+
+def save_config(config: dict) -> None:
+    CONFIG_FILE.write_text(json.dumps(config, indent=2))
+
+
+def get_work_dir() -> str:
+    """Return the configured working directory (always fresh from disk)."""
+    return load_config().get("work_dir", DEFAULT_WORK_DIR)
+
 
 # ── Session persistence ───────────────────────────────────────────────────────
 
@@ -95,6 +118,10 @@ class ActivitySendRequest(BaseModel):
     prompt: str
 
 
+class UpdateSettingsRequest(BaseModel):
+    work_dir: str
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 async def _run_claude_cancellable(
@@ -110,7 +137,7 @@ async def _run_claude_cancellable(
     Raises HTTPException(499) on client cancel, RuntimeError on Claude error.
     """
     loop = asyncio.get_event_loop()
-    proc = start_claude(prompt, session_id)
+    proc = start_claude(prompt, session_id, work_dir=get_work_dir())
     fut = loop.run_in_executor(None, collect_claude, proc, session_id, _broadcast)
 
     try:
@@ -196,6 +223,26 @@ async def session_info():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/settings")
+async def get_settings():
+    """Return current server-side settings."""
+    config = load_config()
+    return {"work_dir": config.get("work_dir", DEFAULT_WORK_DIR)}
+
+
+@app.post("/settings")
+async def update_settings(req: UpdateSettingsRequest):
+    """Update server-side settings."""
+    work_dir = req.work_dir.strip()
+    if not work_dir:
+        raise HTTPException(status_code=400, detail="work_dir cannot be empty")
+    config = load_config()
+    config["work_dir"] = work_dir
+    save_config(config)
+    logger.info("Settings updated: work_dir=%s", work_dir)
+    return {"work_dir": work_dir}
 
 
 @app.get("/ngrok-url")

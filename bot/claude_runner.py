@@ -42,9 +42,16 @@ _MCP_CONFIG = json.dumps({
 })
 
 
-def start_claude(prompt: str, session_id: str | None = None) -> subprocess.Popen:
+def start_claude(
+    prompt: str,
+    session_id: str | None = None,
+    work_dir: "str | Path | None" = None,
+) -> subprocess.Popen:
     """
     Launch Claude Code as a non-blocking subprocess.
+
+    work_dir: working directory for the subprocess.  Defaults to the module-level
+              WORK_DIR (from CLAUDE_WORK_DIR env var or home directory).
 
     The caller is responsible for waiting on the process (via collect_claude)
     or killing it (via kill_claude) when the client disconnects.
@@ -53,6 +60,11 @@ def start_claude(prompt: str, session_id: str | None = None) -> subprocess.Popen
     kill_claude can SIGTERM the whole tree (claude + MCP server sidecar)
     without affecting this server process.
     """
+    cwd = Path(work_dir).expanduser() if work_dir else WORK_DIR
+    if not cwd.exists():
+        logger.warning("work_dir %s does not exist — falling back to home", cwd)
+        cwd = Path.home()
+
     cmd = [
         "claude",
         "--print", prompt,
@@ -63,13 +75,13 @@ def start_claude(prompt: str, session_id: str | None = None) -> subprocess.Popen
     if session_id:
         cmd += ["--resume", session_id]
 
-    logger.info("Starting claude: session=%s prompt_len=%d", session_id, len(prompt))
+    logger.info("Starting claude: session=%s work_dir=%s prompt_len=%d", session_id, cwd, len(prompt))
     return subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        cwd=str(WORK_DIR),
+        cwd=str(cwd),
         start_new_session=True,   # own process group → safe to kill tree
     )
 

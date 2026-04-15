@@ -12,9 +12,13 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var logger = AppLogger.shared
     @State private var urlDraft: String = ""
+    @State private var workDirDraft: String = ""
     @State private var showingScanner = false
     @State private var showingConfirmation = false
     @State private var showingLogs = false
+    @State private var isSavingWorkDir = false
+
+    private let apiService = APIService()
 
     var body: some View {
         NavigationStack {
@@ -40,9 +44,26 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextField("~/git/buck", text: $workDirDraft)
+                        .autocapitalization(.none)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .overlay(alignment: .trailing) {
+                            if isSavingWorkDir {
+                                ProgressView().padding(.trailing, 8)
+                            }
+                        }
+                } header: {
+                    Text("Working Directory")
+                } footer: {
+                    Text("The folder Claude Code runs in on the server. Use ~ for your home directory.")
+                        .font(.footnote)
+                }
+
+                Section {
                     Button("Save") {
                         serverURL = urlDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                        showingConfirmation = true
+                        saveWorkDir()
                     }
                     .disabled(urlDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
@@ -92,6 +113,34 @@ struct SettingsView: View {
             }
             .onAppear {
                 urlDraft = serverURL
+                fetchWorkDir()
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func fetchWorkDir() {
+        guard !serverURL.isEmpty else { return }
+        Task {
+            if let result = try? await apiService.getSettings() {
+                workDirDraft = result.workDir
+            }
+        }
+    }
+
+    private func saveWorkDir() {
+        let dir = workDirDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !dir.isEmpty, !serverURL.isEmpty else {
+            showingConfirmation = true
+            return
+        }
+        isSavingWorkDir = true
+        Task {
+            _ = try? await apiService.updateSettings(workDir: dir)
+            await MainActor.run {
+                isSavingWorkDir = false
+                showingConfirmation = true
             }
         }
     }
