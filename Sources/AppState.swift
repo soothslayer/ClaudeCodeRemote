@@ -214,6 +214,7 @@ final class AppState: ObservableObject {
         case .pausedListening:
             isPaused = false
             await transition(to: pausedFromListeningState)
+            await voiceManager.speak("Go ahead.")
             if pausedFromListeningState == .listeningForChoice {
                 await listenForSessionChoice()
             } else {
@@ -222,6 +223,7 @@ final class AppState: ObservableObject {
 
         case .waitingForInput:
             await transition(to: .listeningForPrompt)
+            await voiceManager.speak("Go ahead.")
             await listenAndSend()
 
         case .error:
