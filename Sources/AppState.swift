@@ -32,7 +32,7 @@ final class AppState: ObservableObject {
     private var isPaused = false
     private var pausedFromListeningState: VoiceState = .listeningForPrompt
 
-    // Cancellable API call — stored so triple-tap can cancel it mid-flight
+    // Cancellable API call — stored so double-tap can cancel it mid-flight
     private var currentApiTask: Task<(String, String), Error>?
 
     init() {
@@ -144,7 +144,7 @@ final class AppState: ObservableObject {
         await transition(to: .processing)
         await voiceManager.speak("Got it. Sending to Claude Code now.")
 
-        // Wrap the API call in a stored Task so triple-tap can cancel it.
+        // Wrap the API call in a stored Task so double-tap can cancel it.
         let task = Task<(String, String), Error> {
             if let sessionId = self.sessionManager.lastSessionId {
                 let r = try await self.apiService.sendMessage(sessionId: sessionId, prompt: text)
@@ -227,7 +227,7 @@ final class AppState: ObservableObject {
             await greet()
 
         case .processing:
-            await voiceManager.speak("Still thinking. Triple tap to cancel.")
+            break  // Single-tap is suppressed in ContentView during .processing; double-tap cancels
         }
     }
 
