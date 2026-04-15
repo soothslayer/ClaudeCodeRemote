@@ -17,12 +17,12 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from claude_runner import run_claude
+from claude_runner import start_claude, collect_claude, kill_claude
 
 # ── Config ────────────────────────────────────────────────────────────────────
 load_dotenv()
@@ -76,12 +76,50 @@ class MessageRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+async def _run_claude_cancellable(
+    request: Request,
+    prompt: str,
+    session_id: str | None,
+) -> tuple[str, str]:
+    """
+    Run a Claude Code subprocess and kill it if the HTTP client disconnects.
+
+    Polls request.is_disconnected() every 0.5 s while collect_claude() runs
+    in a thread pool.  Returns (response_text, session_id).
+    Raises HTTPException(499) on client cancel, RuntimeError on Claude error.
+    """
+    loop = asyncio.get_event_loop()
+    proc = start_claude(prompt, session_id)
+    fut = loop.run_in_executor(None, collect_claude, proc, session_id)
+
+    try:
+        while not fut.done():
+            if await request.is_disconnected():
+                logger.info("Client disconnected — killing Claude subprocess (pid=%d)", proc.pid)
+                kill_claude(proc)
+                fut.cancel()
+                raise HTTPException(status_code=499, detail="Cancelled by client")
+            await asyncio.sleep(0.5)
+
+        return await fut
+
+    except HTTPException:
+        raise
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        kill_claude(proc)
+        raise RuntimeError(str(exc)) from exc
+
+
 @app.post("/session/new")
-async def new_session(req: NewSessionRequest):
+async def new_session(req: NewSessionRequest, request: Request):
     """Start a fresh Claude Code session."""
     logger.info("New session: %s…", req.prompt[:80])
     try:
-        response, session_id = await asyncio.to_thread(run_claude, req.prompt, None)
+        response, session_id = await _run_claude_cancellable(request, req.prompt, None)
+    except HTTPException:
+        raise
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -90,11 +128,13 @@ async def new_session(req: NewSessionRequest):
 
 
 @app.post("/session/message")
-async def send_message_endpoint(req: MessageRequest):
+async def send_message_endpoint(req: MessageRequest, request: Request):
     """Send a follow-up message in an existing session."""
     logger.info("Message in session %s: %s…", req.session_id, req.prompt[:80])
     try:
-        response, session_id = await asyncio.to_thread(run_claude, req.prompt, req.session_id)
+        response, session_id = await _run_claude_cancellable(request, req.prompt, req.session_id)
+    except HTTPException:
+        raise
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
