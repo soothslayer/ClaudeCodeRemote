@@ -10,6 +10,9 @@ struct ContentView: View {
 
     @StateObject private var appState = AppState()
     @State private var showSettings = false
+    /// Prevents the 1.5 s Settings gesture from firing after we already
+    /// handled a 0.8 s cancel-processing long press.
+    @State private var longPressCancelled = false
 
     var body: some View {
         GeometryReader { _ in
@@ -30,23 +33,29 @@ struct ContentView: View {
         }
         // Full-screen tap to respond
         .contentShape(Rectangle())
-        // Double-tap cancels an in-progress Claude Code request.
-        // Must be listed before single-tap so SwiftUI gives it priority.
-        .onTapGesture(count: 2) {
-            guard !appState.isRequestingPermissions else { return }
-            appState.cancelProcessing()
-        }
-        // Single-tap for everything else. During .processing this is a no-op
-        // so the double-tap above gets a clean shot without interference.
+        // Single-tap handles every state transition.
         .onTapGesture {
             guard !appState.isRequestingPermissions else { return }
-            guard appState.voiceState != .processing else { return }
             Task { await appState.handleTap() }
         }
-        // Long press opens settings — disabled while permission dialogs are on screen
-        // to prevent the dialog dismiss animation from accidentally triggering it.
+        // 0.8 s long press while processing → cancel.
+        // Sets longPressCancelled so the 1.5 s Settings gesture below won't
+        // also fire on the same hold.
+        .onLongPressGesture(minimumDuration: 0.8) {
+            guard !appState.isRequestingPermissions else { return }
+            guard appState.voiceState == .processing else { return }
+            longPressCancelled = true
+            appState.cancelProcessing()
+            // Clear flag after the 1.5 s window has safely passed.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                longPressCancelled = false
+            }
+        }
+        // 1.5 s long press → open Settings (any state except processing,
+        // and not if we already fired the cancel gesture on this same hold).
         .onLongPressGesture(minimumDuration: 1.5) {
             guard !appState.isRequestingPermissions else { return }
+            guard !longPressCancelled else { return }
             showSettings = true
         }
         .sheet(isPresented: $showSettings) {
@@ -167,7 +176,7 @@ struct ContentView: View {
         case .listeningForChoice: return "Listening. Say new session or continue. Double tap to pause."
         case .listeningForPrompt: return "Listening for your message. Speak now. Double tap to pause."
         case .pausedListening:    return "Listening paused. Double tap to resume."
-        case .processing:         return "Claude Code is thinking. Double tap to cancel."
+        case .processing:         return "Claude Code is thinking. Hold to cancel."
         case .waitingForInput:    return "Ready for your response. Double tap to speak."
         case .error(let msg):     return "Error: \(msg). Double tap to try again."
         case .idle:               return "Claude Code Remote. Ready. Double tap to start."

@@ -32,7 +32,7 @@ final class AppState: ObservableObject {
     private var isPaused = false
     private var pausedFromListeningState: VoiceState = .listeningForPrompt
 
-    // Cancellable API call — stored so double-tap can cancel it mid-flight
+    // Cancellable API call — stored so long-press can cancel it mid-flight
     private var currentApiTask: Task<(String, String), Error>?
 
     init() {
@@ -227,7 +227,7 @@ final class AppState: ObservableObject {
             await greet()
 
         case .processing:
-            break  // Single-tap is suppressed in ContentView during .processing; double-tap cancels
+            await voiceManager.speak("Still thinking. Hold to cancel.")
         }
     }
 
