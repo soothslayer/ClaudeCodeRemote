@@ -71,6 +71,7 @@ class ClaudeRemoteApp(rumps.App):
                 rumps.MenuItem("Open QR Page",         callback=self.open_qr_page),
                 rumps.MenuItem("Open Activity Window", callback=self.open_activity),
                 None,  # separator
+                rumps.MenuItem("Restart", callback=self.restart_app),
                 rumps.MenuItem("Quit", callback=self.quit_app),
             ],
             quit_button=None,  # custom Quit so we can clean up ngrok
@@ -127,7 +128,27 @@ class ClaudeRemoteApp(rumps.App):
     def open_activity(self, _sender):
         webbrowser.open(f"http://localhost:{PORT}/activity")
 
+    def restart_app(self, _sender):
+        """Quit cleanly — the LaunchAgent's KeepAlive:true will relaunch us."""
+        if self._ngrok_proc:
+            try:
+                self._ngrok_proc.terminate()
+            except Exception:
+                pass
+        rumps.quit_application()
+
     def quit_app(self, _sender):
+        # Rename the LaunchAgent label so launchd does NOT restart after this quit.
+        # Simplest approach: bootout the job, then quit.  The user can re-bootstrap
+        # manually or log out/in to restart.
+        try:
+            plist = Path.home() / "Library/LaunchAgents/com.claudecoderemote.menubar.plist"
+            subprocess.run(
+                ["launchctl", "bootout", f"gui/{os.getuid()}", str(plist)],
+                check=False,
+            )
+        except Exception:
+            pass
         if self._ngrok_proc:
             try:
                 self._ngrok_proc.terminate()
