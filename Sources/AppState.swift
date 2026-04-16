@@ -218,14 +218,57 @@ final class AppState: ObservableObject {
             AppLogger.shared.log("API task cancelled by user", tag: "API")
             // cancelProcessing() already updated the UI synchronously; nothing else needed.
         } catch {
-            checkInTask.cancel()
-            currentApiTask = nil
-            guard voiceState == .processing else { return }
-            let msg = errorMessage(for: error)
-            await transition(to: .error(msg))
-            await voiceManager.speak("Error: \(msg). Tap anywhere to try again.")
-            await transition(to: .waitingForInput)
+            // The HTTP call failed — could be a real error, or the iOS app
+            // was backgrounded and the connection dropped while Claude was
+            // still thinking.  Before giving up, poll /session/info:
+            // the server keeps running and stashes the result as
+            // pending_response when it completes.
+            AppLogger.shared.log("HTTP error '\(errorMessage(for: error))' — polling /session/info for pending response", tag: "API")
+            if let recovered = await pollForPendingResponse() {
+                checkInTask.cancel()
+                currentApiTask = nil
+                guard voiceState == .processing else { return }
+                await handleIncomingResponse(recovered)
+            } else {
+                checkInTask.cancel()
+                currentApiTask = nil
+                guard voiceState == .processing else { return }
+                let msg = errorMessage(for: error)
+                await transition(to: .error(msg))
+                await voiceManager.speak("Error: \(msg). Tap anywhere to try again.")
+                await transition(to: .waitingForInput)
+            }
         }
+    }
+
+    /// Poll /session/info every 10 s for up to 10 minutes, looking for a
+    /// `pending_response` set by the server after an HTTP disconnect.
+    /// Returns the response text if one arrives; nil otherwise.  Also
+    /// persists the server's latest session id along the way.
+    private func pollForPendingResponse(
+        maxAttempts: Int = 60,
+        intervalSeconds: UInt64 = 10
+    ) async -> String? {
+        for attempt in 0..<maxAttempts {
+            if Task.isCancelled { return nil }
+            // User tapped cancel (cancelProcessing moved voiceState out of .processing)
+            if voiceState != .processing { return nil }
+            do {
+                let info = try await apiService.sessionInfo()
+                if let sid = info.sessionId, !sid.isEmpty {
+                    sessionManager.saveSession(id: sid)
+                }
+                if let pending = info.pendingResponse, !pending.isEmpty {
+                    AppLogger.shared.log("Recovered pending_response on attempt \(attempt + 1)", tag: "API")
+                    return pending
+                }
+            } catch {
+                // Keep retrying — transient network error during recovery
+            }
+            try? await Task.sleep(nanoseconds: intervalSeconds * 1_000_000_000)
+        }
+        AppLogger.shared.log("No pending_response after \(maxAttempts) attempts — giving up", tag: "API")
+        return nil
     }
 
     // MARK: - Handle incoming response
@@ -321,6 +364,11 @@ final class AppState: ObservableObject {
         // Cancel the network task (may be nil if we're still in the "Got it" speech).
         currentApiTask?.cancel()
         currentApiTask = nil
+
+        // Tell the server to actually kill the Claude subprocess too —
+        // otherwise it keeps running in the background (that behaviour is
+        // intentional for backgrounding/timeout recovery, not user cancels).
+        Task { [apiService] in await apiService.cancelSession() }
 
         // Stop any in-progress TTS so we don't keep speaking over the cancellation.
         voiceManager.stopSpeaking()

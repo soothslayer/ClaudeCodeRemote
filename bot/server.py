@@ -96,11 +96,30 @@ def load_session() -> dict:
     return {}
 
 
-def save_session(session_id: str, last_response: str = "") -> None:
-    SESSION_FILE.write_text(json.dumps({
-        "session_id": session_id,
-        "last_response": last_response,
-    }))
+def save_session(
+    session_id: str,
+    last_response: str = "",
+    pending_response: str | None = None,
+) -> None:
+    data = load_session()
+    data["session_id"] = session_id
+    if last_response:
+        data["last_response"] = last_response
+    if pending_response is not None:
+        data["pending_response"] = pending_response
+    else:
+        # A successful foreground response makes any earlier pending_response stale.
+        data.pop("pending_response", None)
+    SESSION_FILE.write_text(json.dumps(data))
+
+
+def take_pending_response() -> str | None:
+    """Return pending_response if set, and clear it from disk (read-once)."""
+    data = load_session()
+    pending = data.pop("pending_response", None)
+    if pending is not None:
+        SESSION_FILE.write_text(json.dumps(data))
+    return pending
 
 
 # ── Request / response models ─────────────────────────────────────────────────
@@ -124,39 +143,79 @@ class UpdateSettingsRequest(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+# Track the currently running Claude subprocess so POST /session/cancel
+# can kill it explicitly.  Single-user bot — at most one active at a time.
+_active_proc: "subprocess.Popen | None" = None
+
+
 async def _run_claude_cancellable(
     request: Request,
     prompt: str,
     session_id: str | None,
 ) -> tuple[str, str]:
     """
-    Run a Claude Code subprocess and kill it if the HTTP client disconnects.
+    Run a Claude Code subprocess.  If the HTTP client disconnects mid-run
+    (iOS backgrounding, flaky network, etc.) the subprocess is NOT killed —
+    it finishes in the background and its result is persisted as
+    `pending_response` on the session so the client can fetch it later
+    via GET /session/info.
 
-    Polls request.is_disconnected() every 0.5 s while collect_claude() runs
-    in a thread pool.  Returns (response_text, session_id).
-    Raises HTTPException(499) on client cancel, RuntimeError on Claude error.
+    To cancel a run on purpose, call POST /session/cancel.
+
+    Returns (response_text, session_id) on normal completion.
+    Raises HTTPException(499) if the client gave up (subprocess continues).
+    Raises RuntimeError on Claude error.
     """
+    global _active_proc
+
     loop = asyncio.get_event_loop()
     proc = start_claude(prompt, session_id, work_dir=get_work_dir())
+    _active_proc = proc
     fut = loop.run_in_executor(None, collect_claude, proc, session_id, _broadcast)
+
+    async def _finalize_in_background() -> None:
+        """Client gave up — await the subprocess and stash the result."""
+        global _active_proc
+        try:
+            response, final_sid = await fut
+            save_session(final_sid, last_response=response, pending_response=response)
+            logger.info(
+                "Background claude completed after client disconnect: session=%s len=%d",
+                final_sid, len(response),
+            )
+        except Exception:
+            logger.exception("Background claude failed after client disconnect")
+        finally:
+            if _active_proc is proc:
+                _active_proc = None
 
     try:
         while not fut.done():
             if await request.is_disconnected():
-                logger.info("Client disconnected — killing Claude subprocess (pid=%d)", proc.pid)
-                kill_claude(proc)
-                fut.cancel()
-                raise HTTPException(status_code=499, detail="Cancelled by client")
+                logger.info(
+                    "Client disconnected — detaching claude subprocess (pid=%d) to finish in background",
+                    proc.pid,
+                )
+                asyncio.create_task(_finalize_in_background())
+                raise HTTPException(status_code=499, detail="Cancelled by client (server continuing)")
             await asyncio.sleep(0.5)
 
-        return await fut
+        result = await fut
+        if _active_proc is proc:
+            _active_proc = None
+        return result
 
     except HTTPException:
+        # Subprocess intentionally kept alive; _active_proc cleared by background task.
         raise
     except RuntimeError:
+        if _active_proc is proc:
+            _active_proc = None
         raise
     except Exception as exc:
         kill_claude(proc)
+        if _active_proc is proc:
+            _active_proc = None
         raise RuntimeError(str(exc)) from exc
 
 
@@ -212,12 +271,41 @@ async def activity_send(req: ActivitySendRequest, request: Request):
 
 @app.get("/session/info")
 async def session_info():
-    """Returns current session state."""
+    """
+    Returns current session state.
+
+    If a response arrived while the iOS client was disconnected (e.g. the
+    app was backgrounded and the HTTP call timed out), it's returned here
+    as `pending_response` and cleared from disk — so it's delivered at
+    most once.
+    """
     data = load_session()
+    pending = take_pending_response()
     return {
         "has_session": bool(data.get("session_id")),
         "session_id": data.get("session_id"),
+        "pending_response": pending,
     }
+
+
+@app.post("/session/cancel")
+async def session_cancel():
+    """
+    Explicitly kill any running Claude subprocess.  Called by the iOS app
+    when the user long-presses to cancel.  If no subprocess is running,
+    this is a no-op.
+    """
+    global _active_proc
+    proc = _active_proc
+    if proc is None:
+        return {"cancelled": False}
+    try:
+        kill_claude(proc)
+    finally:
+        if _active_proc is proc:
+            _active_proc = None
+    logger.info("Cancel requested — killed claude subprocess (pid=%d)", proc.pid)
+    return {"cancelled": True, "pid": proc.pid}
 
 
 @app.get("/health")

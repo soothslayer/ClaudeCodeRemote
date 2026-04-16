@@ -83,6 +83,15 @@ final class APIService {
         return try await post(path: "/settings", body: body)
     }
 
+    /// Tell the server to kill any in-flight Claude subprocess.  Used when
+    /// the user long-presses to cancel — without this, the server keeps the
+    /// subprocess running after the HTTP connection drops (the desired
+    /// behaviour for background/timeout recovery, but not for cancellation).
+    func cancelSession() async {
+        struct CancelResult: Codable { let cancelled: Bool }
+        _ = try? await post(path: "/session/cancel", body: [String: String]()) as CancelResult
+    }
+
     // MARK: - HTTP helpers
 
     private func post<T: Decodable>(path: String, body: [String: String]) async throws -> T {
