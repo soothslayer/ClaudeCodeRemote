@@ -17,12 +17,13 @@ from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from claude_runner import start_claude, collect_claude, kill_claude
+from claude_session import ClaudeSession
 
 # ── Activity-window SSE broadcast ─────────────────────────────────────────────
 # Each connected /activity/stream client gets its own asyncio.Queue.
@@ -56,6 +57,8 @@ async def lifespan(app: FastAPI):
     global _event_loop
     _event_loop = asyncio.get_event_loop()
     yield
+    if _duplex_session is not None:
+        _duplex_session.close()
 
 app = FastAPI(title="Claude Code Remote", lifespan=lifespan)
 app.add_middleware(
@@ -288,6 +291,116 @@ async def session_info():
     }
 
 
+# ── Full-duplex WebSocket layer ───────────────────────────────────────────────
+# One persistent ClaudeSession (single-user bot). Normalized events fan out to
+# every connected /ws client; raw stdout lines go to the /activity page.
+
+_duplex_session: ClaudeSession | None = None
+_ws_queues: set[asyncio.Queue] = set()
+_duplex_working = False
+
+
+def _duplex_event(evt: dict) -> None:
+    """Thread-safe fan-out of ClaudeSession events (called from reader thread)."""
+    global _duplex_working
+    typ = evt.get("type")
+
+    if typ == "status":
+        _duplex_working = evt.get("state") == "working"
+    elif typ == "session":
+        save_session(evt["session_id"])
+    elif typ == "turn_done":
+        # No client connected → stash as pending so reconnect delivers it.
+        pending = evt.get("text") if not _ws_queues else None
+        save_session(
+            evt.get("session_id") or load_session().get("session_id", ""),
+            last_response=evt.get("text", ""),
+            pending_response=pending,
+        )
+
+    if _event_loop is None:
+        return
+    for q in list(_ws_queues):
+        _event_loop.call_soon_threadsafe(q.put_nowait, evt)
+
+
+def _ensure_duplex(resume: bool) -> ClaudeSession:
+    """Return the running ClaudeSession, (re)starting it as needed."""
+    global _duplex_session
+    if _duplex_session is None:
+        _duplex_session = ClaudeSession(on_event=_duplex_event, on_raw=_broadcast)
+
+    session_id = load_session().get("session_id") if resume else None
+    if not resume:
+        # Fresh session requested — drop the old process and stored id.
+        _duplex_session.close()
+        SESSION_FILE.write_text(json.dumps({}))
+        _duplex_session.start(None, work_dir=get_work_dir())
+    elif not _duplex_session.is_running:
+        _duplex_session.start(session_id, work_dir=get_work_dir())
+    return _duplex_session
+
+
+@app.websocket("/ws")
+async def ws_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    q: asyncio.Queue = asyncio.Queue()
+    _ws_queues.add(q)
+    logger.info("WS client connected (%d total)", len(_ws_queues))
+
+    async def sender():
+        while True:
+            evt = await q.get()
+            await websocket.send_json({"v": 1, **evt})
+
+    sender_task = asyncio.create_task(sender())
+    try:
+        while True:
+            msg = json.loads(await websocket.receive_text())
+            typ = msg.get("type")
+
+            if typ == "start":
+                sess = await asyncio.to_thread(_ensure_duplex, bool(msg.get("resume")))
+                if sess.session_id:
+                    await websocket.send_json(
+                        {"v": 1, "type": "session", "session_id": sess.session_id}
+                    )
+                await websocket.send_json(
+                    {"v": 1, "type": "status",
+                     "state": "working" if _duplex_working else "idle"}
+                )
+                pending = take_pending_response()
+                if pending:
+                    await websocket.send_json(
+                        {"v": 1, "type": "turn_done", "text": pending,
+                         "session_id": sess.session_id or ""}
+                    )
+
+            elif typ == "user_text":
+                text = (msg.get("text") or "").strip()
+                if not text:
+                    continue
+                _broadcast(json.dumps({"type": "user", "text": text, "source": "ios"}))
+                sess = await asyncio.to_thread(_ensure_duplex, True)
+                await asyncio.to_thread(sess.send_user, text)
+
+            elif typ == "interrupt":
+                if _duplex_session is not None and _duplex_session.is_running:
+                    await asyncio.to_thread(_duplex_session.interrupt)
+
+            elif typ == "ping":
+                await websocket.send_json({"v": 1, "type": "pong"})
+
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("WS handler error")
+    finally:
+        sender_task.cancel()
+        _ws_queues.discard(q)
+        logger.info("WS client disconnected (%d remaining)", len(_ws_queues))
+
+
 @app.post("/session/cancel")
 async def session_cancel():
     """
@@ -296,6 +409,11 @@ async def session_cancel():
     this is a no-op.
     """
     global _active_proc
+    # Duplex path: interrupt the persistent session's current turn.
+    if _duplex_session is not None and _duplex_session.is_running:
+        await asyncio.to_thread(_duplex_session.interrupt)
+        logger.info("Cancel requested — interrupted persistent claude session")
+        return {"cancelled": True}
     proc = _active_proc
     if proc is None:
         return {"cancelled": False}

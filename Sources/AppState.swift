@@ -1,17 +1,12 @@
 import Foundation
 import Combine
 
-// MARK: - Voice State
+// MARK: - Voice State (headline UI state — the coloured circle)
 
 enum VoiceState: Equatable {
-    case idle
-    case speaking
-    case pausedSpeaking       // Speech paused; tap to resume
-    case listeningForChoice   // New session vs continue
-    case listeningForPrompt   // User's coding request
-    case pausedListening      // Listening paused; tap to resume
-    case processing           // Waiting for Claude Code response
-    case waitingForInput      // Response read, tap to respond
+    case idle           // pre-first-tap or muted between conversations
+    case connecting     // opening WebSocket to server
+    case conversing     // duplex live — sub-states expressed in isSpeaking/isListening/isWorking
     case error(String)
 }
 
@@ -20,409 +15,278 @@ enum VoiceState: Equatable {
 @MainActor
 final class AppState: ObservableObject {
 
+    // Headline UI state
     @Published private(set) var voiceState: VoiceState = .idle
     @Published private(set) var statusMessage: String = ""
     @Published private(set) var isRequestingPermissions = false
 
+    // Sub-states (all valid simultaneously during .conversing)
+    @Published private(set) var isSpeaking = false          // TTS audible
+    @Published private(set) var isListening = false         // mic hot + hearing user
+    @Published private(set) var isWorking = false           // Claude Code is thinking
+    @Published private(set) var isMuted = false
+
+    // Collaborators
     let voiceManager: VoiceManager
+    let realtimeClient: RealtimeClient
     let apiService: APIService
     let sessionManager: SessionManager
 
-    // Pause support
-    private var isPaused = false
-    private var pausedFromListeningState: VoiceState = .listeningForPrompt
-
-    // Cancellable API call — stored so long-press can cancel it mid-flight
-    private var currentApiTask: Task<(String, String), Error>?
+    // Once true, tapping in .conversing toggles mute rather than re-issuing
+    // the greeting. Reset on shake/hard reset.
+    private var duplexEverStarted = false
+    private var lastToolActivityAt: Date = .distantPast
+    private var subscriptions = Set<AnyCancellable>()
 
     init() {
         voiceManager = VoiceManager()
+        realtimeClient = RealtimeClient()
         apiService = APIService()
         sessionManager = SessionManager()
+
+        // Mirror VoiceManager's published sub-states so ContentView can react.
+        voiceManager.$isSpeaking
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.isSpeaking = $0 }
+            .store(in: &subscriptions)
+        voiceManager.$isHearingUser
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.isListening = $0 }
+            .store(in: &subscriptions)
+        voiceManager.$isMuted
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in self?.isMuted = $0 }
+            .store(in: &subscriptions)
+
+        voiceManager.onUtterance = { [weak self] text in
+            self?.handleUserUtterance(text)
+        }
+        voiceManager.onBargeIn = { [weak self] in
+            self?.handleBargeIn()
+        }
+
+        realtimeClient.onEvent = { [weak self] event in
+            self?.handleServerEvent(event)
+        }
     }
 
-    // MARK: - Entry point
+    // MARK: - Entry
 
     func onAppear() async {
         let log = AppLogger.shared
-        print("start")
         log.log("onAppear start", tag: "INIT")
 
         isRequestingPermissions = true
-        log.log("requesting permissions…", tag: "INIT")
         let granted = await voiceManager.requestPermissions()
         isRequestingPermissions = false
-        log.log("permissions granted=\(granted)", tag: "INIT")
 
         guard granted else {
-            let msg = "Permissions required. Please open Settings and allow microphone and speech recognition access, then restart the app."
-            log.log("permissions denied — showing error", tag: "INIT")
+            let msg = "Permissions required. Open Settings and allow microphone and speech recognition access."
+            await voiceManager.speakAndWait(msg)
             await transition(to: .error(msg))
             return
         }
 
-        log.log("transitioning to .idle — waiting for tap", tag: "INIT")
-        await transition(to: .idle)
+        // Server URL not set? Wait for the setup link — same as before.
+        let hasURL = !(UserDefaults.standard.string(forKey: "serverURL")?.isEmpty ?? true)
+        guard hasURL else {
+            let msg = "Please set the server URL. Long press to open Settings, or tap a setup link."
+            await voiceManager.speakAndWait(msg)
+            await transition(to: .idle)
+            return
+        }
+
+        await startConversation(resume: sessionManager.hasSession)
     }
 
-    // MARK: - Magic setup link
+    // MARK: - Magic link (unchanged behaviour)
 
-    /// Handles clauderemote://setup?url=https://…
-    /// Saves the server URL and speaks a confirmation so the user doesn't need
-    /// to open Settings at all.
     func handleSetupLink(_ url: URL) async {
         guard url.scheme?.lowercased() == "clauderemote",
               url.host?.lowercased() == "setup",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let serverURL = components.queryItems?.first(where: { $0.name == "url" })?.value,
-              !serverURL.isEmpty else {
-            AppLogger.shared.log("Ignored unrecognised deep link: \(url)", tag: "LINK")
-            return
-        }
+              !serverURL.isEmpty else { return }
 
         UserDefaults.standard.set(serverURL, forKey: "serverURL")
         AppLogger.shared.log("Server URL set via magic link: \(serverURL)", tag: "LINK")
 
-        // Speak confirmation regardless of current state so the user knows it worked
-        await voiceManager.speak("Server connected. You're all set. Tap anywhere to start.")
-
-        // If the app was idle (first launch), transition stays at .idle so one tap starts
-        // If the app was already running in another state, leave it as-is
-    }
-
-    // MARK: - Greeting
-
-    private func greet() async {
-        let log = AppLogger.shared
-        log.log("greet() start, hasSession=\(sessionManager.hasSession)", tag: "GREET")
-        await transition(to: .speaking)
-        let greeting: String
-        if sessionManager.hasSession {
-            greeting = "Welcome back to Claude Code Remote. Say new session to start fresh, or say continue to pick up where you left off."
-        } else {
-            greeting = "Welcome to Claude Code Remote. Say new session to get started."
-        }
-        log.log("calling speak(greeting)…", tag: "GREET")
-        await voiceManager.speak(greeting)
-        log.log("speak(greeting) returned", tag: "GREET")
-        await transition(to: .listeningForChoice)
-        await listenForSessionChoice()
-    }
-
-    // MARK: - Session choice
-
-    private func listenForSessionChoice() async {
-        guard let text = await voiceManager.listen() else {
-            if isPaused {
-                pausedFromListeningState = .listeningForChoice
-                await transition(to: .pausedListening)
-                return
-            }
-            await voiceManager.speak("I didn't catch that. Tap anywhere to try again.")
-            await transition(to: .waitingForInput)
-            return
-        }
-        let lower = text.lowercased()
-        if lower.contains("continue") || lower.contains("last") || lower.contains("back") {
-            await continueSession()
-        } else {
-            await startNewSession()
+        if !duplexEverStarted {
+            await voiceManager.speakAndWait("Server connected. Tap anywhere to start.")
         }
     }
 
-    // MARK: - New session
+    // MARK: - Conversation lifecycle
 
-    private func startNewSession() async {
-        sessionManager.clearSession()
-        await transition(to: .speaking)
-        await voiceManager.speak("Starting a new session. What would you like to work on?")
-        await transition(to: .listeningForPrompt)
-        await listenAndSend()
-    }
+    private func startConversation(resume: Bool) async {
+        duplexEverStarted = true
+        await transition(to: .connecting)
+        await voiceManager.speakAndWait(
+            resume
+                ? "Reconnecting to your session."
+                : "Starting a new session. Say hello when you're ready."
+        )
 
-    // MARK: - Continue session
-
-    private func continueSession() async {
-        await transition(to: .speaking)
-        if sessionManager.hasSession {
-            await voiceManager.speak("Continuing your last session. What would you like to say?")
-        } else {
-            await voiceManager.speak("No previous session found. Starting a new session. What would you like to work on?")
-        }
-        await transition(to: .listeningForPrompt)
-        await listenAndSend()
-    }
-
-    // MARK: - Core listen → send → speak loop
-
-    func listenAndSend() async {
-        guard let text = await voiceManager.listen() else {
-            if isPaused {
-                pausedFromListeningState = .listeningForPrompt
-                await transition(to: .pausedListening)
-                return
-            }
-            await voiceManager.speak("I didn't catch that. Tap anywhere to try again.")
-            await transition(to: .waitingForInput)
-            return
-        }
-
-        await transition(to: .processing)
-
-        // Create and store the task BEFORE speaking so cancelProcessing()
-        // can cancel it even if called during the "Got it" confirmation speech.
-        let task = Task<(String, String), Error> {
-            if let sessionId = self.sessionManager.lastSessionId {
-                let r = try await self.apiService.sendMessage(sessionId: sessionId, prompt: text)
-                return (r.sessionId, r.response)
-            } else {
-                let r = try await self.apiService.newSession(prompt: text)
-                return (r.sessionId, r.response)
-            }
-        }
-        currentApiTask = task
-
-        await voiceManager.speak("Got it. Sending to Claude Code now.")
-
-        // Periodic check-in task — two purposes:
-        //  1. Speaks aloud so the user knows work is still in progress
-        //  2. Keeps the AVAudioSession active so iOS doesn't suspend the app
-        //     when the user backgrounds it (UIBackgroundModes: [audio])
-        let checkInTask = Task { @MainActor [weak self] in
-            let intervals: [UInt64] = [
-                90_000_000_000,   // first check-in after 90 s
-                120_000_000_000,  // then every 2 min
-            ]
-            var iteration = 0
-            while true {
-                let delay = iteration < intervals.count ? intervals[iteration] : intervals.last!
-                do { try await Task.sleep(nanoseconds: delay) } catch { return }
-                guard let self, !Task.isCancelled, voiceState == .processing else { return }
-                let elapsed = iteration == 0 ? "a minute and a half" : "\(Int((iteration + 1) * 2)) minutes"
-                await voiceManager.speak("Still working, \(elapsed) in.")
-                iteration += 1
-            }
-        }
-
+        // Start the audio engine first — enables barge-in during any greeting.
         do {
-            let (sessionId, response) = try await task.value
-            checkInTask.cancel()
-            currentApiTask = nil
-            // Guard: cancelProcessing() may have already moved us out of .processing
-            guard voiceState == .processing else { return }
-            sessionManager.saveSession(id: sessionId)
-            await handleIncomingResponse(response)
-        } catch is CancellationError {
-            checkInTask.cancel()
-            currentApiTask = nil
-            AppLogger.shared.log("API task cancelled by user", tag: "API")
-            // cancelProcessing() already updated the UI synchronously; nothing else needed.
+            try voiceManager.startDuplex()
         } catch {
-            // The HTTP call failed — could be a real error, or the iOS app
-            // was backgrounded and the connection dropped while Claude was
-            // still thinking.  Before giving up, poll /session/info:
-            // the server keeps running and stashes the result as
-            // pending_response when it completes.
-            AppLogger.shared.log("HTTP error '\(errorMessage(for: error))' — polling /session/info for pending response", tag: "API")
-            if let recovered = await pollForPendingResponse() {
-                checkInTask.cancel()
-                currentApiTask = nil
-                guard voiceState == .processing else { return }
-                await handleIncomingResponse(recovered)
-            } else {
-                checkInTask.cancel()
-                currentApiTask = nil
-                guard voiceState == .processing else { return }
-                let msg = errorMessage(for: error)
-                await transition(to: .error(msg))
-                await voiceManager.speak("Error: \(msg). Tap anywhere to try again.")
-                await transition(to: .waitingForInput)
+            let msg = "Could not start audio: \(error.localizedDescription)"
+            await transition(to: .error(msg))
+            await voiceManager.speakAndWait(msg)
+            return
+        }
+
+        // Then open the WebSocket.
+        let connected = await realtimeClient.connect()
+        if !connected {
+            await transition(to: .error("Could not reach the server. Retrying."))
+            // RealtimeClient keeps retrying; we'll flip back to .conversing on connect.
+            await transition(to: .conversing)
+        } else {
+            await transition(to: .conversing)
+        }
+        realtimeClient.startSession(resume: resume)
+    }
+
+    // MARK: - Server events
+
+    private func handleServerEvent(_ event: ServerEvent) {
+        switch event {
+        case .connected(let reconnect):
+            if reconnect {
+                voiceManager.enqueueSpeech("Reconnected. ")
             }
+            if voiceState != .conversing {
+                Task { await transition(to: .conversing) }
+            }
+
+        case .disconnected:
+            voiceManager.enqueueSpeech("Connection dropped. Reconnecting. ")
+
+        case .session(let id):
+            sessionManager.saveSession(id: id)
+
+        case .assistantDelta(let text):
+            voiceManager.enqueueSpeech(text)
+
+        case .toolActivity(let text):
+            // Speak at most one tool summary every 30 s so we don't chatter.
+            let now = Date()
+            if now.timeIntervalSince(lastToolActivityAt) >= 30 {
+                lastToolActivityAt = now
+                voiceManager.enqueueSpeech(text + ". ")
+            }
+
+        case .turnDone(let final):
+            // Server's `result` — flush any remainder the deltas didn't cover.
+            let sanitized = VoiceManager.sanitizeForSpeech(final)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sanitized.isEmpty {
+                voiceManager.finishSpeech()
+            }
+            isWorking = false
+            statusMessage = statusFor(voiceState)
+
+        case .status(let working):
+            isWorking = working
+            if !working { lastToolActivityAt = .distantPast }
+            statusMessage = statusFor(voiceState)
+
+        case .serverError(let message):
+            AppLogger.shared.log("server error: \(message)", tag: "WS")
+            voiceManager.enqueueSpeech("Server error: \(message). ")
         }
     }
 
-    /// Poll /session/info every 10 s for up to 10 minutes, looking for a
-    /// `pending_response` set by the server after an HTTP disconnect.
-    /// Returns the response text if one arrives; nil otherwise.  Also
-    /// persists the server's latest session id along the way.
-    private func pollForPendingResponse(
-        maxAttempts: Int = 60,
-        intervalSeconds: UInt64 = 10
-    ) async -> String? {
-        for attempt in 0..<maxAttempts {
-            if Task.isCancelled { return nil }
-            // User tapped cancel (cancelProcessing moved voiceState out of .processing)
-            if voiceState != .processing { return nil }
-            do {
-                let info = try await apiService.sessionInfo()
-                if let sid = info.sessionId, !sid.isEmpty {
-                    sessionManager.saveSession(id: sid)
-                }
-                if let pending = info.pendingResponse, !pending.isEmpty {
-                    AppLogger.shared.log("Recovered pending_response on attempt \(attempt + 1)", tag: "API")
-                    return pending
-                }
-            } catch {
-                // Keep retrying — transient network error during recovery
-            }
-            try? await Task.sleep(nanoseconds: intervalSeconds * 1_000_000_000)
+    // MARK: - User speech
+
+    private func handleUserUtterance(_ text: String) {
+        AppLogger.shared.log("utterance: \"\(text)\"", tag: "STT")
+
+        // Wake-word interrupt: "stop" / "cancel" (± "claude") aborts current work.
+        if isWorking && isStopWord(text) {
+            realtimeClient.sendInterrupt()
+            voiceManager.enqueueSpeech("Stopping. ")
+            return
         }
-        AppLogger.shared.log("No pending_response after \(maxAttempts) attempts — giving up", tag: "API")
-        return nil
+        realtimeClient.sendUserText(text)
     }
 
-    // MARK: - Handle incoming response
-
-    func handleIncomingResponse(_ response: String) async {
-        await transition(to: .speaking)
-        await voiceManager.speak(response)
-        await voiceManager.speak("Tap anywhere to respond.")
-        await transition(to: .waitingForInput)
+    private func handleBargeIn() {
+        // Speech was already flushed inside VoiceManager. Nothing else to do —
+        // the utterance itself will arrive via onUtterance and steer Claude.
     }
 
-    // MARK: - Tap handler
+    private func isStopWord(_ text: String) -> Bool {
+        let cleaned = text.lowercased()
+            .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces))
+        return ["stop", "cancel", "stop claude", "cancel claude", "claude stop", "claude cancel"].contains(cleaned)
+    }
 
+    // MARK: - Gestures
+
+    /// Tap: while conversing, toggle mute. Before the first conversation, start.
+    /// While showing an error, retry.
     func handleTap() async {
         switch voiceState {
-        case .speaking:
-            voiceManager.pauseSpeaking()
-            await transition(to: .pausedSpeaking)
+        case .idle:
+            await startConversation(resume: sessionManager.hasSession)
 
-        case .pausedSpeaking:
-            voiceManager.resumeSpeaking()
-            await transition(to: .speaking)
+        case .conversing:
+            let willMute = !isMuted
+            voiceManager.setMuted(willMute)
+            await voiceManager.speakAndWait(willMute ? "Muted." : "Listening.")
 
-        case .listeningForChoice:
-            isPaused = true
-            voiceManager.stopListening()
-            // listenForSessionChoice() will check isPaused and park in .pausedListening
-
-        case .listeningForPrompt:
-            isPaused = true
-            voiceManager.stopListening()
-            // listenAndSend() will check isPaused and park in .pausedListening
-
-        case .pausedListening:
-            isPaused = false
-            await transition(to: pausedFromListeningState)
-            await voiceManager.speak("Go ahead.")
-            if pausedFromListeningState == .listeningForChoice {
-                await listenForSessionChoice()
-            } else {
-                await listenAndSend()
-            }
-
-        case .waitingForInput:
-            await transition(to: .listeningForPrompt)
-            await voiceManager.speak("Go ahead.")
-            await listenAndSend()
+        case .connecting:
+            // No-op — the connection attempt is already in flight.
+            break
 
         case .error:
-            await greet()
-
-        case .idle:
-            AppLogger.shared.log("tap received in .idle — starting greet()", tag: "TAP")
-            await greet()
-
-        case .processing:
-            await voiceManager.speak("Still thinking. Hold to cancel.")
+            await startConversation(resume: sessionManager.hasSession)
         }
     }
 
-    // MARK: - Reset to start
-
-    /// Long-press (4 s) hard reset: cancels everything and restarts the greeting.
-    func resetToStart() async {
-        AppLogger.shared.log("resetToStart() called", tag: "RESET")
-
-        // Cancel any in-flight API call
-        currentApiTask?.cancel()
-        currentApiTask = nil
-
-        // Stop TTS and mic
-        voiceManager.stopSpeaking()
-        voiceManager.stopListening()
-
-        // Reset pause state
-        isPaused = false
-        pausedFromListeningState = .listeningForPrompt
-
-        // Brief announcement so the user knows the shake was recognised
-        await transition(to: .speaking)
-        await voiceManager.speak("Starting over.")
-
-        // Restart from the greeting
-        await greet()
-    }
-
-    // MARK: - Cancel processing
-
+    /// 0.8s long-press: interrupt the current turn (same as saying "stop").
     func cancelProcessing() {
-        guard voiceState == .processing else { return }
-        AppLogger.shared.log("cancelProcessing() called", tag: "API")
+        guard isWorking else { return }
+        AppLogger.shared.log("long-press interrupt", tag: "TAP")
+        realtimeClient.sendInterrupt()
+        voiceManager.enqueueSpeech("Stopping. ")
+    }
 
-        // Cancel the network task (may be nil if we're still in the "Got it" speech).
-        currentApiTask?.cancel()
-        currentApiTask = nil
-
-        // Tell the server to actually kill the Claude subprocess too —
-        // otherwise it keeps running in the background (that behaviour is
-        // intentional for backgrounding/timeout recovery, not user cancels).
+    /// Shake: full reset — cancel any turn, drop the session, restart fresh.
+    func resetToStart() async {
+        AppLogger.shared.log("resetToStart()", tag: "RESET")
+        realtimeClient.sendInterrupt()
+        voiceManager.flushSpeech()
+        voiceManager.stopDuplex()
+        realtimeClient.disconnect()
+        sessionManager.clearSession()
+        // Kill any lingering non-duplex subprocess too.
         Task { [apiService] in await apiService.cancelSession() }
-
-        // Stop any in-progress TTS so we don't keep speaking over the cancellation.
-        voiceManager.stopSpeaking()
-
-        // Update UI synchronously — this is what was missing. The catch block in
-        // listenAndSend() won't update state because it now relies on this path.
-        voiceState = .waitingForInput
-        statusMessage = VoiceState.waitingForInput.displayMessage
-
-        // Speak the confirmation on an async task (can't await from a sync func).
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await voiceManager.speak("Cancelled. Tap anywhere to speak.")
-        }
+        await voiceManager.speakAndWait("Starting over.")
+        await startConversation(resume: false)
     }
 
     // MARK: - Helpers
 
     private func transition(to state: VoiceState) async {
         voiceState = state
-        statusMessage = state.displayMessage
+        statusMessage = statusFor(state)
     }
 
-    private func errorMessage(for error: Error) -> String {
-        if let apiError = error as? APIError {
-            switch apiError {
-            case .serverNotConfigured:
-                return "Server URL is not configured. Ask someone to set it up by long pressing the screen."
-            case .serverUnreachable:
-                return "Cannot reach the server. Make sure your computer is running the bot."
-            case .timeout:
-                return "The request timed out. Claude Code may be busy. Try again."
-            case .serverError(let msg):
-                return "Server error: \(msg)"
-            }
-        }
-        return error.localizedDescription
-    }
-}
-
-// MARK: - VoiceState display text
-
-extension VoiceState {
-    var displayMessage: String {
-        switch self {
-        case .idle:                return "Tap anywhere to start"
-        case .speaking:            return "Speaking…"
-        case .pausedSpeaking:      return "Paused — tap to resume"
-        case .listeningForChoice:  return "Listening for your choice…"
-        case .listeningForPrompt:  return "Listening… speak now"
-        case .pausedListening:     return "Paused — tap to resume"
-        case .processing:          return "Claude Code is thinking…"
-        case .waitingForInput:     return "Tap anywhere to respond"
-        case .error(let msg):      return msg
+    private func statusFor(_ state: VoiceState) -> String {
+        switch state {
+        case .idle:        return "Tap anywhere to start"
+        case .connecting:  return "Connecting…"
+        case .conversing:
+            if isMuted   { return "Muted — tap to unmute" }
+            if isWorking { return "Claude Code is working…" }
+            if isSpeaking { return "Speaking — talk anytime to interrupt" }
+            if isListening { return "Listening…" }
+            return "Ready — speak anytime"
+        case .error(let msg): return msg
         }
     }
 }
