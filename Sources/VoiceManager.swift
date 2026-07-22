@@ -38,7 +38,11 @@ final class VoiceManager: NSObject, ObservableObject {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let synthesizer = AVSpeechSynthesizer()
-    private let playbackFormat = AVAudioFormat(standardFormatWithSampleRate: 22_050, channels: 1)!
+    /// Set at startDuplex() to the mainMixerNode's actual output format so
+    /// the player↔mixer connection needs no resampler (a mismatched format
+    /// there silently stops the audio graph on some devices after VPIO is
+    /// enabled).
+    private var playbackFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
     private var aecEnabled = false
 
     // MARK: TTS queue
@@ -110,15 +114,22 @@ final class VoiceManager: NSObject, ObservableObject {
         let log = AppLogger.shared
 
         let session = AVAudioSession.sharedInstance()
+        // .allowBluetooth (HFP) is required for the mic to route through
+        // a Bluetooth headset. The symbol was renamed .allowBluetoothHFP in
+        // iOS 26 and the old name deprecated, but the raw value is stable —
+        // and without it, Bluetooth users get silent mic input.
+        let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
         try session.setCategory(
             .playAndRecord,
             mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetoothA2DP]
+            options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
         )
         try session.setActive(true)
 
-        // Echo cancellation. If unavailable we still run — barge-in then relies
-        // on the echo-text rejection below.
+        // Enable AEC on the input node BEFORE we query mainMixerNode's
+        // format or attach any player nodes. Doing this after the mixer has
+        // been touched leaves the audio graph in a state that silently stops
+        // when playback starts.
         do {
             try engine.inputNode.setVoiceProcessingEnabled(true)
             aecEnabled = true
@@ -127,20 +138,30 @@ final class VoiceManager: NSObject, ObservableObject {
             log.log("voice processing unavailable: \(error)", tag: "DUPLEX")
         }
 
+        // Player node — connect using the mixer's ACTUAL format so the graph
+        // needs no resampler. A hardcoded format here silently kills the
+        // engine on devices whose hardware runs at a different rate.
         engine.attach(playerNode)
-        engine.connect(playerNode, to: engine.mainMixerNode, format: playbackFormat)
+        let mixerFormat = engine.mainMixerNode.outputFormat(forBus: 0)
+        playbackFormat = mixerFormat
+        engine.connect(playerNode, to: engine.mainMixerNode, format: mixerFormat)
+        log.log("mixer format: \(mixerFormat)", tag: "DUPLEX")
 
-        // Mic tap — audio thread. recognitionRequest is nil while muted or
-        // between cycles, which safely drops the buffers.
+        // Mic tap — audio thread. Guard empty buffers (they arrive when the
+        // engine hiccups) so the recognizer doesn't get fed zero-length data.
         let micFormat = engine.inputNode.outputFormat(forBus: 0)
+        log.log("mic tap format: \(micFormat)", tag: "DUPLEX")
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: micFormat) { [weak self] buffer, _ in
+            guard buffer.frameLength > 0 else { return }
             self?.recognitionRequest?.append(buffer)
         }
 
         engine.prepare()
         try engine.start()
         isDuplexRunning = true
-        log.log("duplex started (AEC=\(aecEnabled), route=\(session.currentRoute.outputs.map(\.portName).joined(separator: ",")))", tag: "DUPLEX")
+        let inputs = session.currentRoute.inputs.map(\.portName).joined(separator: ",")
+        let outputs = session.currentRoute.outputs.map(\.portName).joined(separator: ",")
+        log.log("duplex started (AEC=\(aecEnabled), in=\(inputs), out=\(outputs), engineRunning=\(engine.isRunning))", tag: "DUPLEX")
 
         startRecognitionCycle()
     }
@@ -198,13 +219,21 @@ final class VoiceManager: NSObject, ObservableObject {
 
     /// Speak a full announcement (greeting, error) and wait for it to finish.
     /// Falls back to plain AVSpeechSynthesizer if the duplex engine isn't up.
-    func speakAndWait(_ text: String) async {
+    /// Bounded by a hard timeout so a broken audio graph can never wedge the
+    /// caller — the conversation must proceed either way.
+    func speakAndWait(_ text: String, timeout: TimeInterval = 12) async {
         guard isDuplexRunning else {
             await speakFallback(text)
             return
         }
         enqueueSpeech(text + "\n")
+        let deadline = Date().addingTimeInterval(timeout)
         while isSpeaking || isSynthesizing || !pendingSentences.isEmpty {
+            if Date() >= deadline {
+                AppLogger.shared.log("speakAndWait timeout — moving on", tag: "TTS")
+                flushSpeech()
+                return
+            }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
@@ -336,6 +365,21 @@ final class VoiceManager: NSObject, ObservableObject {
         }
         currentPlayback = coordinator
 
+        // Make sure the engine is still running before we play. Something in
+        // the graph (VPIO reconfig, session interruption) can stop it between
+        // startDuplex() and the first sentence; without this, playerNode.play()
+        // fails silently and the coordinator never fires — the app freezes
+        // "speaking" the greeting forever.
+        if !engine.isRunning {
+            AppLogger.shared.log("engine stopped — restarting", tag: "DUPLEX")
+            do { try engine.start() } catch {
+                AppLogger.shared.log("engine restart failed: \(error)", tag: "DUPLEX")
+            }
+        }
+        if !playerNode.isPlaying {
+            playerNode.play()
+        }
+
         let player = playerNode
         synthesizer.write(utterance) { buffer in
             // Synthesizer callback thread — only touch the coordinator/player.
@@ -349,9 +393,6 @@ final class VoiceManager: NSObject, ObservableObject {
             player.scheduleBuffer(out, completionCallbackType: .dataPlayedBack) { _ in
                 coordinator.bufferPlayed()
             }
-        }
-        if !playerNode.isPlaying {
-            playerNode.play()
         }
     }
 
@@ -369,8 +410,22 @@ final class VoiceManager: NSObject, ObservableObject {
     // MARK: - STT: continuous recognition cycles
 
     private func startRecognitionCycle() {
-        guard isDuplexRunning, !isMuted,
-              let recognizer = speechRecognizer, recognizer.isAvailable else { return }
+        let log = AppLogger.shared
+        guard isDuplexRunning, !isMuted else {
+            log.log("cycle skipped (duplex=\(isDuplexRunning) muted=\(isMuted))", tag: "STT")
+            return
+        }
+        guard let recognizer = speechRecognizer else {
+            log.log("no recognizer for en-US", tag: "STT")
+            return
+        }
+        guard recognizer.isAvailable else {
+            log.log("recognizer not available — retrying in 1s", tag: "STT")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                Task { @MainActor [weak self] in self?.startRecognitionCycle() }
+            }
+            return
+        }
 
         recognitionTask?.cancel()
         recognitionTask = nil
@@ -380,12 +435,18 @@ final class VoiceManager: NSObject, ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = false
+        request.taskHint = .dictation
         recognitionRequest = request
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
                 self?.handleRecognition(result: result, error: error)
             }
+        }
+        if recognitionTask == nil {
+            log.log("recognitionTask() returned nil", tag: "STT")
+        } else {
+            log.log("cycle started (onDevice=\(recognizer.supportsOnDeviceRecognition))", tag: "STT")
         }
         scheduleCycleRestart()
     }
@@ -396,6 +457,9 @@ final class VoiceManager: NSObject, ObservableObject {
         if let result {
             let text = result.bestTranscription.formattedString
             if !text.isEmpty {
+                if capturedSpeech != text {
+                    AppLogger.shared.log("partial: \"\(text.prefix(60))\"", tag: "STT")
+                }
                 capturedSpeech = text
                 isHearingUser = true
                 maybeBargeIn(partial: text)
@@ -407,9 +471,9 @@ final class VoiceManager: NSObject, ObservableObject {
             }
         }
 
-        if error != nil {
-            // Includes "no speech detected" (1110) after endAudio — deliver
-            // whatever was captured (may be nothing) and start the next cycle.
+        if let error {
+            let ns = error as NSError
+            AppLogger.shared.log("recognizer error \(ns.domain)/\(ns.code): \(ns.localizedDescription)", tag: "STT")
             endRecognitionCycle(deliver: true)
         }
     }

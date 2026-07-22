@@ -121,13 +121,13 @@ final class AppState: ObservableObject {
     private func startConversation(resume: Bool) async {
         duplexEverStarted = true
         await transition(to: .connecting)
-        await voiceManager.speakAndWait(
-            resume
-                ? "Reconnecting to your session."
-                : "Starting a new session. Say hello when you're ready."
-        )
 
-        // Start the audio engine first — enables barge-in during any greeting.
+        // Start the duplex audio engine BEFORE speaking the greeting — that
+        // way the greeting flows through the same pipeline the rest of the
+        // conversation uses (single audio session state, mic already live for
+        // barge-in). Splitting greeting → then engine start caused the audio
+        // session to reconfigure between them, which on some Bluetooth routes
+        // left the mic silent.
         do {
             try voiceManager.startDuplex()
         } catch {
@@ -136,14 +136,17 @@ final class AppState: ObservableObject {
             await voiceManager.speakAndWait(msg)
             return
         }
+        await transition(to: .conversing)
 
-        // Then open the WebSocket.
+        await voiceManager.speakAndWait(
+            resume
+                ? "Reconnecting to your session."
+                : "Starting a new session. Say hello when you're ready."
+        )
+
         let connected = await realtimeClient.connect()
         if !connected {
             await transition(to: .error("Could not reach the server. Retrying."))
-            // RealtimeClient keeps retrying; we'll flip back to .conversing on connect.
-            await transition(to: .conversing)
-        } else {
             await transition(to: .conversing)
         }
         realtimeClient.startSession(resume: resume)
