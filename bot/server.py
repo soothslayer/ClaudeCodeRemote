@@ -440,15 +440,38 @@ async def get_settings():
 
 @app.post("/settings")
 async def update_settings(req: UpdateSettingsRequest):
-    """Update server-side settings."""
+    """Update server-side settings.
+
+    A subprocess's cwd is fixed at spawn time, so the persistent Claude
+    session (claude_session.py) keeps using the old work_dir until it's
+    restarted. When work_dir actually changes, tear down the current
+    session and drop the stored session id — the next spoken message
+    will spawn a fresh process in the new directory, and the phone
+    hears an announcement so the user isn't confused about the reset.
+    """
+    global _duplex_session
     work_dir = req.work_dir.strip()
     if not work_dir:
         raise HTTPException(status_code=400, detail="work_dir cannot be empty")
+
+    old_work_dir = load_config().get("work_dir", DEFAULT_WORK_DIR)
     config = load_config()
     config["work_dir"] = work_dir
     save_config(config)
     logger.info("Settings updated: work_dir=%s", work_dir)
-    return {"work_dir": work_dir}
+
+    changed = os.path.expanduser(work_dir) != os.path.expanduser(old_work_dir)
+    if changed and _duplex_session is not None and _duplex_session.is_running:
+        logger.info("work_dir changed — tearing down duplex session")
+        _duplex_session.close()
+        SESSION_FILE.write_text(json.dumps({}))
+        _duplex_event({
+            "type": "assistant_delta",
+            "text": f"Working directory changed to {work_dir}. Starting a fresh session. ",
+        })
+        _duplex_event({"type": "status", "state": "idle"})
+
+    return {"work_dir": work_dir, "session_restarted": changed}
 
 
 @app.get("/ngrok-url")
