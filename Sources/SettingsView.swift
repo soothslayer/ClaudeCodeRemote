@@ -1,6 +1,7 @@
 import SwiftUI
 import VisionKit
 import UIKit
+import AVFoundation
 
 // MARK: - SettingsView
 // Accessed via long press. Intended for a sighted caregiver to configure
@@ -69,6 +70,26 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        VoicePickerView()
+                    } label: {
+                        HStack {
+                            Text("Voice")
+                            Spacer()
+                            Text(currentVoiceLabel)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                } header: {
+                    Text("Speech")
+                } footer: {
+                    Text("Tap to pick a voice. For dramatically better quality, download Premium or Enhanced English voices in the iPhone's Settings → Accessibility → Spoken Content → Voices → English.")
+                        .font(.footnote)
+                }
+
+                Section {
                     Button("Clear Session", role: .destructive) {
                         UserDefaults.standard.removeObject(forKey: "lastClaudeSessionId")
                     }
@@ -119,6 +140,27 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    /// Label shown next to "Voice" — the currently picked voice's name +
+    /// quality tag, or "Auto (best available)" if the user hasn't chosen one.
+    private var currentVoiceLabel: String {
+        if let id = UserDefaults.standard.string(forKey: VoiceManager.selectedVoiceIdKey),
+           let voice = AVSpeechSynthesisVoice(identifier: id) {
+            return "\(voice.name) (\(qualityTag(voice.quality)))"
+        }
+        if let auto = VoiceManager.bestEnglishVoice() {
+            return "Auto — \(auto.name)"
+        }
+        return "Auto"
+    }
+
+    private func qualityTag(_ q: AVSpeechSynthesisVoiceQuality) -> String {
+        switch q {
+        case .premium:  return "Premium"
+        case .enhanced: return "Enhanced"
+        default:        return "Default"
+        }
+    }
 
     private func fetchWorkDir() {
         guard !serverURL.isEmpty else { return }
@@ -198,6 +240,119 @@ struct LogViewer: View {
         case "TAP":   return .orange
         default:      return .white
         }
+    }
+}
+
+// MARK: - VoicePickerView
+
+/// Lists every installed English voice, grouped by quality (Premium first).
+/// Tap a row to hear a sample; the check-marked row is the current selection.
+/// "Automatic" at the top means: use the best voice installed right now, and
+/// re-pick automatically if the user installs a better one later.
+struct VoicePickerView: View {
+
+    @AppStorage(VoiceManager.selectedVoiceIdKey) private var selectedId: String = ""
+    @State private var voices: [AVSpeechSynthesisVoice] = []
+    /// A short sentence with pauses so both the timbre and the prosody are audible.
+    private let sample = "Hi. I'm the voice you'll hear when Claude Code speaks."
+    /// Shared synthesizer instance used to play samples — the picker outlives
+    /// individual rows so this stays alive between taps.
+    private let sampleSynth = AVSpeechSynthesizer()
+
+    var body: some View {
+        Form {
+            Section {
+                voiceRow(
+                    title: "Automatic",
+                    subtitle: VoiceManager.bestEnglishVoice().map { "Currently: \($0.name)" } ?? "No English voices installed",
+                    isSelected: selectedId.isEmpty,
+                    onSelect: {
+                        selectedId = ""
+                        if let auto = VoiceManager.bestEnglishVoice() {
+                            playSample(auto)
+                        }
+                    }
+                )
+            } footer: {
+                Text("Picks the best voice currently installed. Upgrades automatically when you install a better one from Settings → Accessibility.")
+                    .font(.footnote)
+            }
+
+            ForEach(qualityGroups, id: \.title) { group in
+                Section(group.title) {
+                    ForEach(group.voices, id: \.identifier) { voice in
+                        voiceRow(
+                            title: voice.name,
+                            subtitle: voice.language,
+                            isSelected: selectedId == voice.identifier,
+                            onSelect: {
+                                selectedId = voice.identifier
+                                playSample(voice)
+                            }
+                        )
+                    }
+                }
+            }
+
+            Section {
+                Link(destination: URL(string: "App-Prefs:ACCESSIBILITY&path=SPEECH")!) {
+                    Label("Install more voices…", systemImage: "arrow.down.circle")
+                }
+            } footer: {
+                Text("Opens the iPhone's Spoken Content settings so you can download Premium and Enhanced voices. They're free but ~100–200 MB each.")
+                    .font(.footnote)
+            }
+        }
+        .navigationTitle("Voice")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { voices = VoiceManager.availableEnglishVoices() }
+        .onDisappear { sampleSynth.stopSpeaking(at: .immediate) }
+    }
+
+    // MARK: Row
+
+    private func voiceRow(title: String, subtitle: String, isSelected: Bool, onSelect: @escaping () -> Void) -> some View {
+        Button(action: onSelect) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).foregroundColor(.primary)
+                    Text(subtitle).font(.caption).foregroundColor(.secondary)
+                }
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark").foregroundColor(.accentColor)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+    }
+
+    // MARK: Grouping
+
+    private struct VoiceGroup {
+        let title: String
+        let voices: [AVSpeechSynthesisVoice]
+    }
+
+    private var qualityGroups: [VoiceGroup] {
+        let premium  = voices.filter { $0.quality == .premium  }
+        let enhanced = voices.filter { $0.quality == .enhanced }
+        let standard = voices.filter { $0.quality != .premium && $0.quality != .enhanced }
+        var groups: [VoiceGroup] = []
+        if !premium.isEmpty  { groups.append(.init(title: "Premium",  voices: premium))  }
+        if !enhanced.isEmpty { groups.append(.init(title: "Enhanced", voices: enhanced)) }
+        if !standard.isEmpty { groups.append(.init(title: "Standard", voices: standard)) }
+        return groups
+    }
+
+    // MARK: Sample playback
+
+    private func playSample(_ voice: AVSpeechSynthesisVoice) {
+        if sampleSynth.isSpeaking { sampleSynth.stopSpeaking(at: .immediate) }
+        let utterance = AVSpeechUtterance(string: sample)
+        utterance.voice = voice
+        utterance.rate = 0.5
+        sampleSynth.speak(utterance)
     }
 }
 

@@ -38,6 +38,10 @@ final class VoiceManager: NSObject, ObservableObject {
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
     private let synthesizer = AVSpeechSynthesizer()
+
+    /// UserDefaults key holding the AVSpeechSynthesisVoice.identifier the user
+    /// picked in Settings. Nil / missing = auto-select the best installed voice.
+    static let selectedVoiceIdKey = "selectedVoiceId"
     /// Set at startDuplex() to the mainMixerNode's actual output format so
     /// the player↔mixer connection needs no resampler (a mismatched format
     /// there silently stops the audio graph on some devices after VPIO is
@@ -244,7 +248,7 @@ final class VoiceManager: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(true)
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = 0.5
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.voice = Self.preferredVoice()
         let waiter = FallbackSpeechWaiter()
         synthesizer.delegate = waiter
         synthesizer.speak(utterance)
@@ -318,6 +322,58 @@ final class VoiceManager: NSObject, ObservableObject {
         pendingSentences.append(sentence)
     }
 
+    // MARK: - Voice selection
+
+    /// The voice to speak with, honoring the user's Settings pick.
+    /// Falls back to the best installed en-US voice (premium > enhanced >
+    /// default). Recomputed on every utterance so a Settings change takes
+    /// effect immediately without restarting the app.
+    static func preferredVoice() -> AVSpeechSynthesisVoice? {
+        if let id = UserDefaults.standard.string(forKey: selectedVoiceIdKey),
+           let picked = AVSpeechSynthesisVoice(identifier: id) {
+            return picked
+        }
+        return bestEnglishVoice() ?? AVSpeechSynthesisVoice(language: "en-US")
+    }
+
+    /// Highest-quality installed English voice, preferring premium then enhanced.
+    static func bestEnglishVoice() -> AVSpeechSynthesisVoice? {
+        let english = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix("en") }
+        return english.first(where: { $0.quality == .premium })
+            ?? english.first(where: { $0.quality == .enhanced })
+            ?? english.first(where: { $0.language == "en-US" })
+    }
+
+    /// All installed English voices, sorted premium → enhanced → default.
+    /// Used by the Settings picker.
+    static func availableEnglishVoices() -> [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix("en") }
+            .sorted { lhs, rhs in
+                if lhs.quality.rawValue != rhs.quality.rawValue {
+                    return lhs.quality.rawValue > rhs.quality.rawValue
+                }
+                if lhs.language != rhs.language {
+                    return lhs.language < rhs.language
+                }
+                return lhs.name < rhs.name
+            }
+    }
+
+    /// Speak a short sample using a specific voice. Used by the Settings
+    /// picker so the user can hear each option before choosing. Runs
+    /// independently of the duplex engine (fires even before startDuplex).
+    func speakSample(_ text: String, voice: AVSpeechSynthesisVoice) {
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.rate = 0.5
+        utterance.voice = voice
+        // Use plain speak() so it works whether the duplex engine is up
+        // or not — the Settings sheet often opens before it is.
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        synthesizer.speak(utterance)
+    }
+
     /// Strip markdown decoration that reads terribly aloud.
     static func sanitizeForSpeech(_ raw: String) -> String {
         var text = raw
@@ -355,7 +411,7 @@ final class VoiceManager: NSObject, ObservableObject {
         utterance.rate = 0.5
         utterance.pitchMultiplier = 1.0
         utterance.volume = 1.0
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
+        utterance.voice = Self.preferredVoice()
 
         let coordinator = PlaybackCoordinator(targetFormat: playbackFormat)
         coordinator.onFinished = { [weak self] in
