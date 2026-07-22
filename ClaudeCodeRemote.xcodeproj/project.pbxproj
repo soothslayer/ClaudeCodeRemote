@@ -17,6 +17,7 @@
 		C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FD1885D55DC54CBB4EEB22 /* APIService.swift */; };
 		CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */; };
 		DA8E807E942F28E852713AF5 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */; };
+		E939CC440E8BB5F2FCB0C310 /* RealtimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8098DD4AF504749C27E7633 /* RealtimeClient.swift */; };
 		EA7AA888D38D61E7A9EA0CA4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF3F705E5374E00BF6CEBFCE /* ContentView.swift */; };
 		F9D1F93E0F36AC02324C259B /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */; };
 /* End PBXBuildFile section */
@@ -36,6 +37,7 @@
 		CF3F705E5374E00BF6CEBFCE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ClaudeCodeRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		F8098DD4AF504749C27E7633 /* RealtimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -51,6 +53,7 @@
 				CF3F705E5374E00BF6CEBFCE /* ContentView.swift */,
 				37063B2E799F980DF4C247A1 /* Info.plist */,
 				3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */,
+				F8098DD4AF504749C27E7633 /* RealtimeClient.swift */,
 				7623456EF8908AB075269730 /* SessionManager.swift */,
 				4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */,
 				44AEB035CBD2593E1BC96A76 /* ShakeDetector.swift */,
@@ -153,6 +156,7 @@
 				55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */,
 				EA7AA888D38D61E7A9EA0CA4 /* ContentView.swift in Sources */,
 				9C5A790062EA986FCAAE2EFF /* QRScannerView.swift in Sources */,
+				E939CC440E8BB5F2FCB0C310 /* RealtimeClient.swift in Sources */,
 				17C86BB1CD340DBA3B760B98 /* SessionManager.swift in Sources */,
 				CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */,
 				80886B1A62F3AD0D6E0307F6 /* ShakeDetector.swift in Sources */,

@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode user-specific state
+xcuserdata/
+*.xcuserstate
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Bot runtime state
+bot/session.json
+bot/config.json
+bot/chat_id.txt
+bot/.env
