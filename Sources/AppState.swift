@@ -238,8 +238,16 @@ final class AppState: ObservableObject {
 
         case .conversing:
             let willMute = !isMuted
-            voiceManager.setMuted(willMute)
-            await voiceManager.speakAndWait(willMute ? "Muted." : "Listening.")
+            if willMute {
+                // Speak the confirmation BEFORE muting — otherwise the audio
+                // engine is already stopped and the confirmation would need
+                // the fallback path.
+                await voiceManager.speakAndWait("Muted.")
+                voiceManager.setMuted(true)
+            } else {
+                voiceManager.setMuted(false)
+                await voiceManager.speakAndWait("Listening.")
+            }
 
         case .connecting:
             // No-op — the connection attempt is already in flight.

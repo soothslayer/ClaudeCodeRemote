@@ -180,21 +180,50 @@ final class VoiceManager: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    /// Tap-to-pause: keeps the engine alive but stops feeding the recognizer.
+    /// Mute the conversation. This actually **releases the microphone** —
+    /// stops the recognizer, halts the audio engine, and deactivates the
+    /// audio session — so iOS drops the red mic-in-use indicator when the
+    /// user backgrounds the app. Unmuting reactivates the session and
+    /// restarts the engine using the graph that was already built at
+    /// startDuplex().
     func setMuted(_ muted: Bool) {
         guard muted != isMuted else { return }
         isMuted = muted
+        let log = AppLogger.shared
         if muted {
             endRecognitionCycle(deliver: false)
+            flushSpeech()
+            engine.stop()
+            try? AVAudioSession.sharedInstance()
+                .setActive(false, options: .notifyOthersOnDeactivation)
+            log.log("muted — engine stopped, session released", tag: "DUPLEX")
         } else if isDuplexRunning {
-            startRecognitionCycle()
+            do {
+                let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
+                try AVAudioSession.sharedInstance().setCategory(
+                    .playAndRecord,
+                    mode: .voiceChat,
+                    options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
+                )
+                try AVAudioSession.sharedInstance().setActive(true)
+                if !engine.isRunning {
+                    try engine.start()
+                }
+                startRecognitionCycle()
+                log.log("unmuted — engine restarted", tag: "DUPLEX")
+            } catch {
+                log.log("unmute failed: \(error)", tag: "DUPLEX")
+            }
         }
     }
 
     // MARK: - TTS: streaming input
 
     /// Feed streaming text (deltas). Complete sentences are spoken as they form.
+    /// Dropped while muted — the user has told us to be quiet in both directions,
+    /// and buffering would produce a stale wall of TTS on unmute.
     func enqueueSpeech(_ delta: String) {
+        guard !isMuted else { return }
         deltaAccumulator += delta
         drainAccumulator(force: false)
         pumpSpeech()
@@ -202,6 +231,7 @@ final class VoiceManager: NSObject, ObservableObject {
 
     /// Turn is over — speak whatever is still buffered.
     func finishSpeech() {
+        guard !isMuted else { return }
         drainAccumulator(force: true)
         pumpSpeech()
     }
