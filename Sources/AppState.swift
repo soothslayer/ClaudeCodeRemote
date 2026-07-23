@@ -237,10 +237,17 @@ final class AppState: ObservableObject {
             await startConversation(resume: sessionManager.hasSession)
 
         case .conversing:
-            // Flip mute synchronously so the UI (mic icon + background) updates
-            // this frame. No spoken confirmation and no flushSpeech — Claude
-            // keeps talking and working while the user's mic is silenced.
-            voiceManager.setMuted(!isMuted)
+            let willMute = !isMuted
+            if willMute {
+                // Speak the confirmation BEFORE muting — otherwise the audio
+                // engine is already stopped and the confirmation would need
+                // the fallback path.
+                await voiceManager.speakAndWait("Muted.")
+                voiceManager.setMuted(true)
+            } else {
+                voiceManager.setMuted(false)
+                await voiceManager.speakAndWait("Listening.")
+            }
 
         case .connecting:
             // No-op — the connection attempt is already in flight.
