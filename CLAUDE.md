@@ -7,27 +7,6 @@ notifications when the app is fully backgrounded.
 
 ---
 
-## Git remote — always push as `soothslayer`
-
-The GitHub remote is `github.com/soothslayer/ClaudeCodeRemote`, and this
-machine has two `gh` accounts authenticated (`soothslayer` + `millee_grid`).
-Git pushes use `gh auth git-credential`, so whichever account is *active*
-in `gh` is the one git pushes as. If `millee_grid` is active, every push
-to this repo 403s.
-
-Before any push (or before creating a branch you'll push), verify and fix:
-
-```bash
-gh auth status | grep -A1 'Active account: true' | head -1
-# If that line is not "Logged in to github.com account soothslayer":
-gh auth switch --user soothslayer
-```
-
-Do this check silently at the start of any ship / push flow — do not push
-first and react to the 403.
-
----
-
 ## Architecture
 
 ```
