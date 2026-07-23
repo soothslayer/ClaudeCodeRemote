@@ -180,50 +180,34 @@ final class VoiceManager: NSObject, ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    /// Mute the conversation. This actually **releases the microphone** —
-    /// stops the recognizer, halts the audio engine, and deactivates the
-    /// audio session — so iOS drops the red mic-in-use indicator when the
-    /// user backgrounds the app. Unmuting reactivates the session and
-    /// restarts the engine using the graph that was already built at
-    /// startDuplex().
+    /// Mute the user's mic without interrupting Claude. Stops the recognizer
+    /// so no utterances or barge-in fire, but leaves the audio engine, audio
+    /// session, and TTS pipeline running so an in-flight response keeps
+    /// playing and future deltas/tool activity still get spoken. Unmuting
+    /// simply restarts the recognition cycle on the already-running engine.
+    ///
+    /// Trade-off: because the engine's input node stays attached, iOS keeps
+    /// showing the mic-in-use indicator while muted. That is intentional —
+    /// the previous behaviour (stop engine, release session) cut Claude off
+    /// mid-sentence, which the user explicitly does not want.
     func setMuted(_ muted: Bool) {
         guard muted != isMuted else { return }
         isMuted = muted
         let log = AppLogger.shared
         if muted {
             endRecognitionCycle(deliver: false)
-            flushSpeech()
-            engine.stop()
-            try? AVAudioSession.sharedInstance()
-                .setActive(false, options: .notifyOthersOnDeactivation)
-            log.log("muted — engine stopped, session released", tag: "DUPLEX")
+            log.log("muted — recognizer stopped, TTS pipeline left running", tag: "DUPLEX")
         } else if isDuplexRunning {
-            do {
-                let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
-                try AVAudioSession.sharedInstance().setCategory(
-                    .playAndRecord,
-                    mode: .voiceChat,
-                    options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
-                )
-                try AVAudioSession.sharedInstance().setActive(true)
-                if !engine.isRunning {
-                    try engine.start()
-                }
-                startRecognitionCycle()
-                log.log("unmuted — engine restarted", tag: "DUPLEX")
-            } catch {
-                log.log("unmute failed: \(error)", tag: "DUPLEX")
-            }
+            startRecognitionCycle()
+            log.log("unmuted — recognizer restarted", tag: "DUPLEX")
         }
     }
 
     // MARK: - TTS: streaming input
 
     /// Feed streaming text (deltas). Complete sentences are spoken as they form.
-    /// Dropped while muted — the user has told us to be quiet in both directions,
-    /// and buffering would produce a stale wall of TTS on unmute.
+    /// Continues while muted — mute only silences the user's mic, not Claude.
     func enqueueSpeech(_ delta: String) {
-        guard !isMuted else { return }
         deltaAccumulator += delta
         drainAccumulator(force: false)
         pumpSpeech()
@@ -231,7 +215,6 @@ final class VoiceManager: NSObject, ObservableObject {
 
     /// Turn is over — speak whatever is still buffered.
     func finishSpeech() {
-        guard !isMuted else { return }
         drainAccumulator(force: true)
         pumpSpeech()
     }
