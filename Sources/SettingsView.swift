@@ -18,6 +18,7 @@ struct SettingsView: View {
     @State private var showingConfirmation = false
     @State private var showingLogs = false
     @State private var isSavingWorkDir = false
+    @State private var showingDirectoryPicker = false
 
     private let apiService = APIService()
 
@@ -54,10 +55,17 @@ struct SettingsView: View {
                                 ProgressView().padding(.trailing, 8)
                             }
                         }
+
+                    Button {
+                        showingDirectoryPicker = true
+                    } label: {
+                        Label("Browse…", systemImage: "folder")
+                    }
+                    .disabled(serverURL.isEmpty)
                 } header: {
                     Text("Working Directory")
                 } footer: {
-                    Text("The folder Claude Code runs in on the server. Use ~ for your home directory.")
+                    Text("The folder Claude Code runs in on the server. Use ~ for your home directory, or tap Browse to pick a folder from the server's home directory.")
                         .font(.footnote)
                 }
 
@@ -132,6 +140,12 @@ struct SettingsView: View {
                 }
                 .ignoresSafeArea()
             }
+            .sheet(isPresented: $showingDirectoryPicker) {
+                DirectoryPickerView { path in
+                    workDirDraft = path
+                    showingDirectoryPicker = false
+                }
+            }
             .onAppear {
                 urlDraft = serverURL
                 fetchWorkDir()
@@ -185,6 +199,95 @@ struct SettingsView: View {
                 showingConfirmation = true
             }
         }
+    }
+}
+
+// MARK: - DirectoryPickerView
+
+/// Sheet root for browsing folders on the server, starting from its home
+/// directory. Pushes a new `DirectoryBrowserScreen` per subfolder tapped;
+/// the native back button navigates up. Tapping "Use This Folder" at any
+/// level calls `onSelect` with the resolved absolute path and closes the
+/// sheet (the caller flips the `isPresented` binding).
+struct DirectoryPickerView: View {
+    let onSelect: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            DirectoryBrowserScreen(path: "", onSelect: onSelect)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+        }
+    }
+}
+
+struct DirectoryBrowserScreen: View {
+    /// Server-absolute path to list, or "" for the home directory.
+    let path: String
+    let onSelect: (String) -> Void
+
+    @State private var result: DirectoryBrowseResult?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+    private let apiService = APIService()
+
+    var body: some View {
+        List {
+            if let errorMessage {
+                Text(errorMessage).foregroundColor(.red)
+            }
+            if let result {
+                Section {
+                    Button {
+                        onSelect(result.path)
+                    } label: {
+                        Label("Use This Folder", systemImage: "checkmark.circle")
+                    }
+                }
+                if result.directories.isEmpty {
+                    Text("No subfolders").foregroundColor(.secondary)
+                } else {
+                    Section {
+                        ForEach(result.directories, id: \.self) { name in
+                            NavigationLink(name) {
+                                DirectoryBrowserScreen(path: childPath(base: result.path, name: name), onSelect: onSelect)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .overlay {
+            if isLoading { ProgressView() }
+        }
+        .task { await load() }
+    }
+
+    private var title: String {
+        guard let result else { return "…" }
+        let name = (result.path as NSString).lastPathComponent
+        return name.isEmpty ? result.path : name
+    }
+
+    private func childPath(base: String, name: String) -> String {
+        base.hasSuffix("/") ? base + name : base + "/" + name
+    }
+
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            result = try await apiService.browseDirectories(path: path)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
     }
 }
 
