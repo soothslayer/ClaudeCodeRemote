@@ -40,6 +40,12 @@ struct SettingsResult: Codable {
     let workDir: String
 }
 
+struct DirectoryBrowseResult: Codable {
+    let path: String
+    let parent: String?
+    let directories: [String]
+}
+
 // MARK: - APIService
 
 final class APIService {
@@ -81,6 +87,17 @@ final class APIService {
     func updateSettings(workDir: String) async throws -> SettingsResult {
         let body: [String: String] = ["work_dir": workDir]
         return try await post(path: "/settings", body: body)
+    }
+
+    /// Lists subdirectories of `path` for the folder-browser in Settings.
+    /// Pass "" to list the home directory (the server's default).
+    func browseDirectories(path: String) async throws -> DirectoryBrowseResult {
+        var query = ""
+        if !path.isEmpty {
+            let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+            query = "?path=\(encoded)"
+        }
+        return try await get(path: "/settings/browse\(query)")
     }
 
     /// Tell the server to kill any in-flight Claude subprocess.  Used when

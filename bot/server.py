@@ -474,6 +474,43 @@ async def update_settings(req: UpdateSettingsRequest):
     return {"work_dir": work_dir, "session_restarted": changed}
 
 
+@app.get("/settings/browse")
+async def browse_directories(path: str = ""):
+    """List subdirectories of `path` (default: home directory) for the
+    iOS folder-picker. Hidden directories (dotfiles) are omitted.
+    """
+    target = Path(os.path.expanduser(path)) if path else Path.home()
+    try:
+        target = target.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Path is not a directory")
+
+    home = Path.home().resolve()
+    try:
+        target.relative_to(home)
+        within_home = True
+    except ValueError:
+        within_home = False
+    if not within_home:
+        raise HTTPException(status_code=400, detail="Path is outside the home directory")
+
+    try:
+        entries = sorted(
+            (e.name for e in target.iterdir() if e.is_dir() and not e.name.startswith(".")),
+            key=str.lower,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "path": str(target),
+        "parent": str(target.parent) if target != home else None,
+        "directories": entries,
+    }
+
+
 @app.get("/ngrok-url")
 async def ngrok_url_endpoint():
     """Return the current public ngrok HTTPS URL by querying the local ngrok API."""
