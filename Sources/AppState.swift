@@ -38,13 +38,6 @@ final class AppState: ObservableObject {
     private var lastToolActivityAt: Date = .distantPast
     private var subscriptions = Set<AnyCancellable>()
 
-    // TTS mode announced by the server at connect. Defaults to client (on-device
-    // AVSpeechSynthesizer) so behavior is unchanged when the server has no
-    // Kokoro-FastAPI configured; flips to .server if Kokoro is reachable, in
-    // which case assistant_delta events are text-only and audio arrives as
-    // audio_frame / speak_text.
-    private var ttsMode: ServerTTSMode = .client
-
     init() {
         voiceManager = VoiceManager()
         realtimeClient = RealtimeClient()
@@ -178,15 +171,10 @@ final class AppState: ObservableObject {
             sessionManager.saveSession(id: id)
 
         case .assistantDelta(let text):
-            // Only speak deltas locally when the server isn't driving TTS.
-            // In server mode, audio arrives as audio_frame / speak_text.
-            if ttsMode == .client {
-                voiceManager.enqueueSpeech(text)
-            }
+            voiceManager.enqueueSpeech(text)
 
         case .toolActivity(let text):
-            // Tool summaries are always spoken via on-device TTS — they're
-            // short, latency-critical, and not part of Claude's text stream.
+            // Speak at most one tool summary every 30 s so we don't chatter.
             let now = Date()
             if now.timeIntervalSince(lastToolActivityAt) >= 30 {
                 lastToolActivityAt = now
@@ -194,12 +182,11 @@ final class AppState: ObservableObject {
             }
 
         case .turnDone(let final):
-            if ttsMode == .client {
-                let sanitized = VoiceManager.sanitizeForSpeech(final)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                if !sanitized.isEmpty {
-                    voiceManager.finishSpeech()
-                }
+            // Server's `result` — flush any remainder the deltas didn't cover.
+            let sanitized = VoiceManager.sanitizeForSpeech(final)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sanitized.isEmpty {
+                voiceManager.finishSpeech()
             }
             isWorking = false
             statusMessage = statusFor(voiceState)
@@ -212,22 +199,6 @@ final class AppState: ObservableObject {
         case .serverError(let message):
             AppLogger.shared.log("server error: \(message)", tag: "WS")
             voiceManager.enqueueSpeech("Server error: \(message). ")
-
-        case .ttsMode(let mode, let sampleRate):
-            ttsMode = mode
-            AppLogger.shared.log("server TTS mode: \(mode.rawValue) rate=\(sampleRate)", tag: "TTS")
-
-        case .audioFrame(_, let pcm, let sampleRate, let final):
-            if !final && !pcm.isEmpty {
-                voiceManager.enqueueServerAudio(pcm: pcm, sampleRate: sampleRate)
-            }
-
-        case .speakText(let text):
-            // Kokoro failed for this sentence — speak it via on-device TTS.
-            voiceManager.enqueueSpeech(text + " ")
-
-        case .ttsFlush:
-            voiceManager.flushSpeech()
         }
     }
 

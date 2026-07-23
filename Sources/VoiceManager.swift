@@ -59,13 +59,6 @@ final class VoiceManager: NSObject, ObservableObject {
     private var currentPlayback: PlaybackCoordinator?
     private var inCodeBlock = false
     private var codeBlockAnnounced = false
-
-    // Server-driven TTS (Kokoro): PCM frames arrive over the WebSocket, get
-    // converted to the player's format, and are scheduled on the same
-    // playerNode as the on-device synthesizer output.
-    private var serverAudioConverter: AVAudioConverter?
-    private var serverAudioSourceFormat: AVAudioFormat?
-    private var outstandingServerFrames = 0
     /// Tail of recently spoken text — used to reject mic "utterances" that are
     /// really our own TTS leaking past the echo canceller.
     private var recentlySpokenText = ""
@@ -289,100 +282,8 @@ final class VoiceManager: NSObject, ObservableObject {
         currentPlayback = nil
         synthesizer.stopSpeaking(at: .immediate)
         playerNode.stop()
-        outstandingServerFrames = 0
         isSynthesizing = false
         isSpeaking = false
-    }
-
-    // MARK: - TTS: server-driven PCM (Kokoro)
-
-    /// Play a raw PCM16 mono chunk delivered by the server. Runs through the
-    /// same player node as on-device TTS, so barge-in and flushSpeech() work
-    /// identically. Silently drops frames when the engine is torn down.
-    func enqueueServerAudio(pcm: Data, sampleRate: Int) {
-        guard !backgroundMicReleased, isDuplexRunning, !pcm.isEmpty else { return }
-        guard let buffer = pcmBuffer(from: pcm, sampleRate: sampleRate),
-              let converted = convertToPlaybackFormat(buffer) else {
-            AppLogger.shared.log("dropped server audio frame (decode failed)", tag: "TTS")
-            return
-        }
-
-        if !engine.isRunning {
-            do { try engine.start() } catch {
-                AppLogger.shared.log("engine restart failed: \(error)", tag: "DUPLEX")
-                return
-            }
-        }
-        if !playerNode.isPlaying {
-            playerNode.play()
-        }
-
-        outstandingServerFrames += 1
-        isSpeaking = true
-        playerNode.scheduleBuffer(converted, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.serverFramePlayed()
-            }
-        }
-    }
-
-    private func serverFramePlayed() {
-        if outstandingServerFrames > 0 {
-            outstandingServerFrames -= 1
-        }
-        if outstandingServerFrames == 0 && !isSynthesizing && pendingSentences.isEmpty {
-            isSpeaking = false
-        }
-    }
-
-    private func pcmBuffer(from pcm: Data, sampleRate: Int) -> AVAudioPCMBuffer? {
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: Double(sampleRate),
-            channels: 1,
-            interleaved: true
-        ) else { return nil }
-        let sampleCount = pcm.count / MemoryLayout<Int16>.size
-        guard sampleCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format,
-                                            frameCapacity: AVAudioFrameCount(sampleCount)) else { return nil }
-        buffer.frameLength = AVAudioFrameCount(sampleCount)
-        pcm.withUnsafeBytes { raw in
-            guard let src = raw.baseAddress?.assumingMemoryBound(to: Int16.self),
-                  let dst = buffer.int16ChannelData?[0] else { return }
-            memcpy(dst, src, sampleCount * MemoryLayout<Int16>.size)
-        }
-        return buffer
-    }
-
-    private func convertToPlaybackFormat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        let sourceFormat = buffer.format
-        if sourceFormat.sampleRate == playbackFormat.sampleRate,
-           sourceFormat.commonFormat == playbackFormat.commonFormat,
-           sourceFormat.channelCount == playbackFormat.channelCount {
-            return buffer
-        }
-        if serverAudioConverter == nil || serverAudioSourceFormat != sourceFormat {
-            serverAudioConverter = AVAudioConverter(from: sourceFormat, to: playbackFormat)
-            serverAudioSourceFormat = sourceFormat
-        }
-        guard let converter = serverAudioConverter else { return nil }
-        let ratio = playbackFormat.sampleRate / sourceFormat.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
-        guard let out = AVAudioPCMBuffer(pcmFormat: playbackFormat, frameCapacity: capacity) else { return nil }
-        var fed = false
-        var error: NSError?
-        let status = converter.convert(to: out, error: &error) { _, inputStatus in
-            if fed {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            fed = true
-            inputStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, out.frameLength > 0 else { return nil }
-        return out
     }
 
     /// Speak a full announcement (greeting, error) and wait for it to finish.

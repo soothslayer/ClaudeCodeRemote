@@ -10,11 +10,6 @@ import Foundation
 // the server re-attaches the persistent Claude session and delivers any
 // response that arrived while we were offline.
 
-enum ServerTTSMode: String {
-    case server
-    case client
-}
-
 enum ServerEvent {
     case connected(reconnect: Bool)
     case disconnected
@@ -24,15 +19,6 @@ enum ServerEvent {
     case turnDone(String)
     case status(working: Bool)
     case serverError(String)
-    /// Server has announced its TTS mode (once, at connect).
-    case ttsMode(mode: ServerTTSMode, sampleRate: Int)
-    /// A chunk of PCM16 mono audio for the current sentence. `final=true` marks
-    /// end-of-sentence; the pcm payload is empty in that case.
-    case audioFrame(seq: Int, pcm: Data, sampleRate: Int, final: Bool)
-    /// Per-sentence fallback when server TTS failed — client speaks it locally.
-    case speakText(String)
-    /// Drop any buffered server audio (server-side interrupt / cancel).
-    case ttsFlush
 }
 
 @MainActor
@@ -226,11 +212,6 @@ final class RealtimeClient: NSObject, ObservableObject {
         let message: String?
         let sessionId: String?
         let state: String?
-        let mode: String?
-        let sampleRate: Int?
-        let seq: Int?
-        let pcm: String?
-        let final: Bool?
     }
 
     private func handle(_ raw: String) {
@@ -252,19 +233,6 @@ final class RealtimeClient: NSObject, ObservableObject {
             onEvent?(.status(working: evt.state == "working"))
         case "error":
             onEvent?(.serverError(evt.message ?? "Unknown server error"))
-        case "tts_mode":
-            let mode = ServerTTSMode(rawValue: evt.mode ?? "client") ?? .client
-            onEvent?(.ttsMode(mode: mode, sampleRate: evt.sampleRate ?? 0))
-        case "audio_frame":
-            let seq = evt.seq ?? 0
-            let rate = evt.sampleRate ?? 24_000
-            let final = evt.final ?? false
-            let pcm = Data(base64Encoded: evt.pcm ?? "") ?? Data()
-            onEvent?(.audioFrame(seq: seq, pcm: pcm, sampleRate: rate, final: final))
-        case "speak_text":
-            if let text = evt.text, !text.isEmpty { onEvent?(.speakText(text)) }
-        case "tts_flush":
-            onEvent?(.ttsFlush)
         default:
             break   // pong etc.
         }
