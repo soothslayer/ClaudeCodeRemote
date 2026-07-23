@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import Combine
+import UIKit
 
 // MARK: - VoiceManager
 // Full-duplex audio engine: the microphone stays live while speech plays.
@@ -74,6 +75,11 @@ final class VoiceManager: NSObject, ObservableObject {
     private let silenceDelay: TimeInterval = 1.8
     private let cycleLimit: TimeInterval = 50   // restart before Apple's ~60 s cap
 
+    /// Set to true when the app backgrounds while muted and we've torn the
+    /// engine + audio session down to release the mic. Cleared when we re-arm
+    /// on foreground or unmute.
+    private var backgroundMicReleased = false
+
     override init() {
         super.init()
         NotificationCenter.default.addObserver(
@@ -81,6 +87,18 @@ final class VoiceManager: NSObject, ObservableObject {
             selector: #selector(handleInterruption(_:)),
             name: AVAudioSession.interruptionNotification,
             object: AVAudioSession.sharedInstance()
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
         )
     }
 
@@ -173,6 +191,7 @@ final class VoiceManager: NSObject, ObservableObject {
     func stopDuplex() {
         guard isDuplexRunning else { return }
         isDuplexRunning = false
+        backgroundMicReleased = false
         flushSpeech()
         endRecognitionCycle(deliver: false)
         engine.inputNode.removeTap(onBus: 0)
@@ -187,9 +206,10 @@ final class VoiceManager: NSObject, ObservableObject {
     /// simply restarts the recognition cycle on the already-running engine.
     ///
     /// Trade-off: because the engine's input node stays attached, iOS keeps
-    /// showing the mic-in-use indicator while muted. That is intentional —
-    /// the previous behaviour (stop engine, release session) cut Claude off
-    /// mid-sentence, which the user explicitly does not want.
+    /// showing the mic-in-use indicator while muted **and the app is in the
+    /// foreground**. When the app backgrounds while muted we tear the engine
+    /// and audio session down (see handleDidEnterBackground) so iOS drops
+    /// the indicator; unmuting re-arms the full stack via reactivateEngine().
     func setMuted(_ muted: Bool) {
         guard muted != isMuted else { return }
         isMuted = muted
@@ -198,8 +218,36 @@ final class VoiceManager: NSObject, ObservableObject {
             endRecognitionCycle(deliver: false)
             log.log("muted — recognizer stopped, TTS pipeline left running", tag: "DUPLEX")
         } else if isDuplexRunning {
-            startRecognitionCycle()
+            if backgroundMicReleased {
+                reactivateEngine()
+            } else {
+                startRecognitionCycle()
+            }
             log.log("unmuted — recognizer restarted", tag: "DUPLEX")
+        }
+    }
+
+    /// Rebuild the audio session + engine after a background release. Safe to
+    /// call only while `isDuplexRunning` — the graph was already built at
+    /// startDuplex(); we just need the session active and the engine spinning.
+    private func reactivateEngine() {
+        let log = AppLogger.shared
+        do {
+            let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
+            try AVAudioSession.sharedInstance().setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
+            )
+            try AVAudioSession.sharedInstance().setActive(true)
+            if !engine.isRunning {
+                try engine.start()
+            }
+            backgroundMicReleased = false
+            startRecognitionCycle()
+            log.log("engine reactivated after background release", tag: "DUPLEX")
+        } catch {
+            log.log("engine reactivation failed: \(error)", tag: "DUPLEX")
         }
     }
 
@@ -207,7 +255,10 @@ final class VoiceManager: NSObject, ObservableObject {
 
     /// Feed streaming text (deltas). Complete sentences are spoken as they form.
     /// Continues while muted — mute only silences the user's mic, not Claude.
+    /// Dropped while the engine is torn down for a muted background release;
+    /// the user has walked away from the app in that case.
     func enqueueSpeech(_ delta: String) {
+        guard !backgroundMicReleased else { return }
         deltaAccumulator += delta
         drainAccumulator(force: false)
         pumpSpeech()
@@ -215,6 +266,7 @@ final class VoiceManager: NSObject, ObservableObject {
 
     /// Turn is over — speak whatever is still buffered.
     func finishSpeech() {
+        guard !backgroundMicReleased else { return }
         drainAccumulator(force: true)
         pumpSpeech()
     }
@@ -654,6 +706,10 @@ final class VoiceManager: NSObject, ObservableObject {
                 self.flushSpeech()
                 self.endRecognitionCycle(deliver: false)
             case .ended:
+                // If we intentionally released the mic (backgrounded + muted),
+                // don't quietly re-arm behind the user's back — let unmute /
+                // foreground do it.
+                guard !self.backgroundMicReleased else { return }
                 try? AVAudioSession.sharedInstance().setActive(true)
                 if !self.engine.isRunning {
                     try? self.engine.start()
@@ -663,6 +719,39 @@ final class VoiceManager: NSObject, ObservableObject {
             @unknown default:
                 break
             }
+        }
+    }
+
+    // MARK: - App lifecycle
+    //
+    // Muted-in-foreground keeps the engine live so Claude can keep speaking.
+    // But once the user backgrounds the app while muted, the mic is doing
+    // nothing useful and iOS keeps showing the recording indicator. Release
+    // the engine + session in that case and re-arm on foreground / unmute.
+
+    @objc private func handleDidEnterBackground() {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.isDuplexRunning,
+                  self.isMuted,
+                  !self.backgroundMicReleased else { return }
+            self.flushSpeech()
+            self.endRecognitionCycle(deliver: false)
+            self.engine.stop()
+            try? AVAudioSession.sharedInstance()
+                .setActive(false, options: .notifyOthersOnDeactivation)
+            self.backgroundMicReleased = true
+            AppLogger.shared.log("backgrounded while muted — mic released", tag: "DUPLEX")
+        }
+    }
+
+    @objc private func handleWillEnterForeground() {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.isDuplexRunning,
+                  self.backgroundMicReleased,
+                  !self.isMuted else { return }
+            self.reactivateEngine()
         }
     }
 }
