@@ -1,4 +1,5 @@
 import AVFoundation
+import AudioToolbox
 import Speech
 import Combine
 
@@ -32,6 +33,8 @@ final class VoiceManager: NSObject, ObservableObject {
     var onUtterance: ((String) -> Void)?
     /// The user started talking over TTS; the speech queue was just flushed.
     var onBargeIn: (() -> Void)?
+    /// Claude finished speaking — the mic is now open for the user.
+    var onTurnReady: (() -> Void)?
 
     // MARK: Audio graph
 
@@ -71,7 +74,7 @@ final class VoiceManager: NSObject, ObservableObject {
     private var bargedInThisCycle = false
     private var silenceTimer: DispatchWorkItem?
     private var cycleRestartTimer: DispatchWorkItem?
-    private let silenceDelay: TimeInterval = 1.8
+    private let silenceDelay: TimeInterval = 1.2
     private let cycleLimit: TimeInterval = 50   // restart before Apple's ~60 s cap
 
     override init() {
@@ -488,9 +491,18 @@ final class VoiceManager: NSObject, ObservableObject {
         currentPlayback = nil
         if pendingSentences.isEmpty {
             isSpeaking = false
+            playTurnChime()
+            onTurnReady?()
         } else {
             pumpSpeech()
         }
+    }
+
+    /// Play a short chime to signal it's the user's turn to speak.
+    private func playTurnChime() {
+        guard isDuplexRunning, !isMuted else { return }
+        // System sound 1057 = "Tink" — a subtle, short notification tone.
+        AudioServicesPlaySystemSound(1057)
     }
 
     // MARK: - STT: continuous recognition cycles
@@ -568,7 +580,7 @@ final class VoiceManager: NSObject, ObservableObject {
         guard isSpeaking, !bargedInThisCycle else { return }
         let words = partial.split(separator: " ").count
         let letters = partial.filter(\.isLetter).count
-        guard words >= 2 || letters >= 4 else { return }        // residual-echo guard
+        guard words >= 4 || letters >= 8 else { return }        // residual-echo guard (raised to reduce false barge-ins)
         guard !isEchoOfSpokenText(partial) else { return }
         bargedInThisCycle = true
         AppLogger.shared.log("barge-in: \"\(partial.prefix(40))\"", tag: "DUPLEX")
