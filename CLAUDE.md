@@ -54,6 +54,7 @@ AVSpeechSynthesizer.write() → PCM        │                --input-format str
 
 **Key design decisions:**
 - **Full duplex:** iOS `AVAudioEngine` with `setVoiceProcessingEnabled(true)` on the input node gives hardware echo cancellation, so the mic can stay open while TTS plays. Both mic tap and playback (`AVAudioPlayerNode`) live on the same engine — TTS is rendered offline via `AVSpeechSynthesizer.write(_:)` into PCM and scheduled on the player node, giving the AEC an accurate reference signal and letting `playerNode.stop()` provide instant barge-in.
+- **TTS voice:** server-side Kokoro-FastAPI is used when reachable (much less robotic than `AVSpeechSynthesizer`). The server chunks Claude's stream into sentences, synthesizes each via Kokoro's OpenAI-compatible `/v1/audio/speech` endpoint (`response_format=pcm`), and streams 24 kHz mono PCM16 back over the same WebSocket as `audio_frame` events. iOS decodes the PCM, converts it to the player node's format, and schedules it on the same node as before — so echo cancellation and barge-in behave identically. If Kokoro is unreachable at connect time the server announces `tts_mode=client` and iOS falls back to on-device `AVSpeechSynthesizer`; if a single sentence fails synthesis mid-turn the server emits `speak_text` and iOS speaks just that sentence with the on-device voice.
 - **Streaming:** the server keeps ONE long-lived Claude subprocess (`claude_session.py`) per conversation. It emits `stream_event` deltas which the server normalizes into `assistant_delta` WebSocket events; the phone speaks each completed sentence as it arrives instead of waiting for the whole turn.
 - **Interrupts:** speech in the middle of a turn is sent as `user_text` steering (the CLI accepts stream-json input mid-run). Saying only "stop"/"cancel" — or long-pressing 0.8 s — sends a `control_request:{subtype:"interrupt"}` that aborts the current turn without killing the process.
 - **Transport:** WebSocket at `/ws` rides the same ngrok tunnel. The HTTP endpoints (`/session/new`, `/message`, `/info`, `/cancel`, `/settings`, `/qr`, `/activity`) are kept so nothing breaks and so `/activity` can still watch the conversation.
@@ -164,6 +165,8 @@ server-side interrupt (`POST /session/cancel`) that the shake gesture calls.
 | `claude_session.py` | `ClaudeSession` | Persistent Claude process. `start()` spawns `claude --print --input-format stream-json --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --mcp-config …` (optionally `--resume`); `send_user()` writes stream-json user messages to stdin (works mid-turn); `interrupt()` writes a `control_request:{subtype:"interrupt"}`; a background thread parses stdout into normalized events |
 | `claude_session.py` | `_tool_summary(name, input)` | Turns `tool_use` blocks into short spoken summaries — "Editing AppState.swift", "Running command: git status", etc. |
 | `claude_runner.py` | `start_claude`/`collect_claude`/`kill_claude` | Kept for the legacy per-turn HTTP endpoints (unused by the duplex loop) |
+| `tts_kokoro.py` | `KokoroTTS` | Async client for Kokoro-FastAPI. `check_available()` probes `/v1/models` at startup; `synthesize(text)` posts to `/v1/audio/speech` with `response_format=pcm` and yields raw PCM16 mono 24 kHz chunks |
+| `tts_pipeline.py` | `SentencePipeline` | Server-side sentence chunker mirroring iOS's `drainAccumulator`. Consumes `assistant_delta` text via `add_delta()`, dispatches each finished sentence through Kokoro, emits `audio_frame` events (or `speak_text` on synth failure). `cancel()` on interrupt drops queued sentences and aborts the in-flight synth |
 | `telegram_notifier.py` | `send_message`/`poll_and_register` | Unchanged Telegram push layer |
 
 **Session file schema (`session.json`):**
@@ -185,9 +188,13 @@ Client → server (JSON per frame):
 - `{"type":"ping"}`
 
 Server → client (JSON per frame; every message carries `"v":1`):
+- `{"type":"tts_mode","mode":"server"|"client","sample_rate":24000}` — sent once at connect: `"server"` means Kokoro is driving TTS and the client must ignore `assistant_delta` for playback; `"client"` (or absent) means fall back to on-device TTS
 - `{"type":"session","session_id":"…"}`
-- `{"type":"assistant_delta","text":"…"}`
+- `{"type":"assistant_delta","text":"…"}` — text stream (always sent; used for transcript/logging even in server mode)
 - `{"type":"tool_activity","text":"Editing X"}`
+- `{"type":"audio_frame","seq":N,"frame":F,"sample_rate":24000,"pcm":"<base64>","final":false}` — chunk of PCM16 mono audio for sentence `seq`; `final:true` with empty `pcm` marks end-of-sentence
+- `{"type":"speak_text","seq":N,"text":"…"}` — per-sentence fallback (Kokoro failed for this one, speak on-device)
+- `{"type":"tts_flush"}` — drop all buffered server audio (server-side interrupt)
 - `{"type":"turn_done","text":"…","session_id":"…"}`
 - `{"type":"status","state":"working"|"idle"}`
 - `{"type":"error","message":"…"}`
@@ -197,6 +204,10 @@ Server → client (JSON per frame; every message carries `"v":1`):
 - `TELEGRAM_BOT_TOKEN` — from @BotFather (optional; Telegram push won't work without it)
 - `TELEGRAM_USER_CHAT_ID` — manual override if auto-registration fails
 - `PORT` — default 8080
+- `KOKORO_URL` — Kokoro-FastAPI base URL (default `http://localhost:8880/v1`). If unreachable at startup, the server logs and falls back to client-side TTS
+- `KOKORO_VOICE` — default `af_heart`. Any voice id Kokoro-FastAPI knows works
+- `KOKORO_SPEED` — default `1.0`
+- `KOKORO_DISABLE` — set to `1` to force client-side TTS even when Kokoro is running
 
 ---
 
@@ -208,6 +219,12 @@ cd bot && bash setup.sh          # one-time: venv, deps, checks
 source .venv/bin/activate
 python server.py                 # keep running
 ngrok http 8080                  # in another terminal; copy https:// URL
+
+# Optional: neural TTS via Kokoro-FastAPI (runs alongside the bot server)
+docker run -d --name kokoro-fastapi -p 8880:8880 \
+    ghcr.io/remsky/kokoro-fastapi-cpu:latest    # CPU build; GPU image is *-gpu
+# server.py auto-detects it on http://localhost:8880/v1 at startup; disable
+# with KOKORO_DISABLE=1 or point at a different host with KOKORO_URL.
 
 # iOS
 xcodegen generate                # only needed after adding/renaming Swift files

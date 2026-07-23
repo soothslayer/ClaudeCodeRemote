@@ -24,6 +24,8 @@ from pydantic import BaseModel
 
 from claude_runner import start_claude, collect_claude, kill_claude
 from claude_session import ClaudeSession
+from tts_kokoro import KokoroTTS
+from tts_pipeline import SentencePipeline
 
 # ── Activity-window SSE broadcast ─────────────────────────────────────────────
 # Each connected /activity/stream client gets its own asyncio.Queue.
@@ -54,9 +56,25 @@ DEFAULT_WORK_DIR = "~/git/buck"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _event_loop
+    global _event_loop, _kokoro, _pipeline
     _event_loop = asyncio.get_event_loop()
+
+    # Optional: server-side neural TTS via Kokoro-FastAPI. If it's reachable,
+    # each spoken sentence goes through it and streams back as PCM audio_frame
+    # events; if not, the iOS client keeps using on-device AVSpeechSynthesizer.
+    if os.environ.get("KOKORO_DISABLE", "").lower() not in ("1", "true", "yes"):
+        candidate = KokoroTTS()
+        if await candidate.check_available():
+            _kokoro = candidate
+            _pipeline = SentencePipeline(emit=_pipeline_emit, kokoro=candidate)
+            _pipeline.start()
+        else:
+            await candidate.close()
+
     yield
+
+    if _pipeline is not None:
+        await _pipeline.close()
     if _duplex_session is not None:
         _duplex_session.close()
 
@@ -298,6 +316,18 @@ async def session_info():
 _duplex_session: ClaudeSession | None = None
 _ws_queues: set[asyncio.Queue] = set()
 _duplex_working = False
+_kokoro: KokoroTTS | None = None
+_pipeline: SentencePipeline | None = None
+
+
+def _pipeline_emit(evt: dict) -> None:
+    """Fan-out a pipeline-generated TTS event to every WS client.
+
+    Runs on the event loop (called from the pipeline worker), so we can
+    schedule directly without call_soon_threadsafe.
+    """
+    for q in list(_ws_queues):
+        q.put_nowait(evt)
 
 
 def _duplex_event(evt: dict) -> None:
@@ -320,6 +350,15 @@ def _duplex_event(evt: dict) -> None:
 
     if _event_loop is None:
         return
+
+    # Feed the server-side TTS pipeline so Kokoro can synthesize alongside
+    # the text going to the client.
+    if _pipeline is not None:
+        if typ == "assistant_delta":
+            _event_loop.call_soon_threadsafe(_pipeline.add_delta, evt.get("text", ""))
+        elif typ == "turn_done":
+            _event_loop.call_soon_threadsafe(_pipeline.finish_turn)
+
     for q in list(_ws_queues):
         _event_loop.call_soon_threadsafe(q.put_nowait, evt)
 
@@ -348,6 +387,16 @@ async def ws_endpoint(websocket: WebSocket):
     _ws_queues.add(q)
     logger.info("WS client connected (%d total)", len(_ws_queues))
 
+    # Advertise whether the server will drive TTS. The client uses this to
+    # decide whether to speak assistant_delta locally or wait for audio_frame /
+    # speak_text events.
+    await websocket.send_json({
+        "v": 1,
+        "type": "tts_mode",
+        "mode": "server" if _pipeline is not None else "client",
+        "sample_rate": _kokoro.sample_rate if _kokoro is not None else 0,
+    })
+
     async def sender():
         while True:
             evt = await q.get()
@@ -371,6 +420,11 @@ async def ws_endpoint(websocket: WebSocket):
                 )
                 pending = take_pending_response()
                 if pending:
+                    # Route through the pipeline so server TTS speaks it too;
+                    # deltas + turn_done still go to the client as text.
+                    if _pipeline is not None:
+                        _pipeline.add_delta(pending)
+                        _pipeline.finish_turn()
                     await websocket.send_json(
                         {"v": 1, "type": "turn_done", "text": pending,
                          "session_id": sess.session_id or ""}
@@ -387,6 +441,8 @@ async def ws_endpoint(websocket: WebSocket):
             elif typ == "interrupt":
                 if _duplex_session is not None and _duplex_session.is_running:
                     await asyncio.to_thread(_duplex_session.interrupt)
+                if _pipeline is not None:
+                    _pipeline.cancel()
 
             elif typ == "ping":
                 await websocket.send_json({"v": 1, "type": "pong"})
@@ -412,6 +468,8 @@ async def session_cancel():
     # Duplex path: interrupt the persistent session's current turn.
     if _duplex_session is not None and _duplex_session.is_running:
         await asyncio.to_thread(_duplex_session.interrupt)
+        if _pipeline is not None:
+            _pipeline.cancel()
         logger.info("Cancel requested — interrupted persistent claude session")
         return {"cancelled": True}
     proc = _active_proc
@@ -464,6 +522,8 @@ async def update_settings(req: UpdateSettingsRequest):
     if changed and _duplex_session is not None and _duplex_session.is_running:
         logger.info("work_dir changed — tearing down duplex session")
         _duplex_session.close()
+        if _pipeline is not None:
+            _pipeline.cancel()
         SESSION_FILE.write_text(json.dumps({}))
         _duplex_event({
             "type": "assistant_delta",
