@@ -9,6 +9,7 @@ Usage:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ from pydantic import BaseModel
 
 from claude_runner import start_claude, collect_claude, kill_claude
 from claude_session import ClaudeSession
+from openai_realtime import OpenAIRealtimeBridge, is_configured as openai_realtime_configured
 from tts_kokoro import KokoroTTS
 from tts_pipeline import SentencePipeline
 
@@ -75,6 +77,8 @@ async def lifespan(app: FastAPI):
 
     if _pipeline is not None:
         await _pipeline.close()
+    for bridge in list(_openai_bridges):
+        await bridge.close()
     if _duplex_session is not None:
         _duplex_session.close()
 
@@ -315,6 +319,8 @@ async def session_info():
 
 _duplex_session: ClaudeSession | None = None
 _ws_queues: set[asyncio.Queue] = set()
+_standard_ws_queues: set[asyncio.Queue] = set()
+_openai_bridges: set[OpenAIRealtimeBridge] = set()
 _duplex_working = False
 _kokoro: KokoroTTS | None = None
 _pipeline: SentencePipeline | None = None
@@ -326,7 +332,7 @@ def _pipeline_emit(evt: dict) -> None:
     Runs on the event loop (called from the pipeline worker), so we can
     schedule directly without call_soon_threadsafe.
     """
-    for q in list(_ws_queues):
+    for q in list(_standard_ws_queues):
         q.put_nowait(evt)
 
 
@@ -353,11 +359,28 @@ def _duplex_event(evt: dict) -> None:
 
     # Feed the server-side TTS pipeline so Kokoro can synthesize alongside
     # the text going to the client.
-    if _pipeline is not None:
+    if _pipeline is not None and _standard_ws_queues:
         if typ == "assistant_delta":
             _event_loop.call_soon_threadsafe(_pipeline.add_delta, evt.get("text", ""))
         elif typ == "turn_done":
             _event_loop.call_soon_threadsafe(_pipeline.finish_turn)
+
+    # OpenAI Realtime is an optional speech layer around the same Claude
+    # session. It voices Claude's completed response; it never replaces the
+    # coding agent or receives the API key from the phone.
+    if typ == "assistant_delta":
+        delta = evt.get("text", "")
+        for bridge in list(_openai_bridges):
+            _event_loop.call_soon_threadsafe(
+                lambda bridge=bridge, delta=delta:
+                    asyncio.create_task(bridge.add_text_delta(delta))
+            )
+    elif typ == "turn_done":
+        for bridge in list(_openai_bridges):
+            _event_loop.call_soon_threadsafe(
+                lambda bridge=bridge:
+                    asyncio.create_task(bridge.finish_text())
+            )
 
     for q in list(_ws_queues):
         _event_loop.call_soon_threadsafe(q.put_nowait, evt)
@@ -385,6 +408,8 @@ async def ws_endpoint(websocket: WebSocket):
     await websocket.accept()
     q: asyncio.Queue = asyncio.Queue()
     _ws_queues.add(q)
+    _standard_ws_queues.add(q)
+    openai_bridge: OpenAIRealtimeBridge | None = None
     logger.info("WS client connected (%d total)", len(_ws_queues))
 
     # Advertise whether the server will drive TTS. The client uses this to
@@ -403,6 +428,15 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.send_json({"v": 1, **evt})
 
     sender_task = asyncio.create_task(sender())
+
+    async def submit_user_text(text: str) -> None:
+        text = text.strip()
+        if not text:
+            return
+        _broadcast(json.dumps({"type": "user", "text": text, "source": "ios"}))
+        sess = await asyncio.to_thread(_ensure_duplex, True)
+        await asyncio.to_thread(sess.send_user, text)
+
     try:
         while True:
             msg = json.loads(await websocket.receive_text())
@@ -410,6 +444,45 @@ async def ws_endpoint(websocket: WebSocket):
 
             if typ == "start":
                 sess = await asyncio.to_thread(_ensure_duplex, bool(msg.get("resume")))
+                requested_openai = msg.get("voice_mode") == "openai_realtime"
+                if requested_openai and openai_realtime_configured():
+                    candidate = OpenAIRealtimeBridge(
+                        on_transcript=submit_user_text,
+                        on_event=q.put,
+                    )
+                    try:
+                        await candidate.open()
+                    except Exception as exc:
+                        logger.warning("OpenAI Realtime unavailable; using standard voice: %s", exc)
+                        await websocket.send_json({
+                            "v": 1,
+                            "type": "voice_mode",
+                            "mode": "standard",
+                            "reason": "OpenAI Realtime could not connect.",
+                        })
+                    else:
+                        openai_bridge = candidate
+                        _openai_bridges.add(candidate)
+                        _standard_ws_queues.discard(q)
+                        await websocket.send_json({
+                            "v": 1,
+                            "type": "voice_mode",
+                            "mode": "openai_realtime",
+                            "sample_rate": 24_000,
+                        })
+                elif requested_openai:
+                    await websocket.send_json({
+                        "v": 1,
+                        "type": "voice_mode",
+                        "mode": "standard",
+                        "reason": "OPENAI_API_KEY is not configured on the bot server.",
+                    })
+                else:
+                    await websocket.send_json({
+                        "v": 1,
+                        "type": "voice_mode",
+                        "mode": "standard",
+                    })
                 if sess.session_id:
                     await websocket.send_json(
                         {"v": 1, "type": "session", "session_id": sess.session_id}
@@ -420,9 +493,11 @@ async def ws_endpoint(websocket: WebSocket):
                 )
                 pending = take_pending_response()
                 if pending:
-                    # Route through the pipeline so server TTS speaks it too;
-                    # deltas + turn_done still go to the client as text.
-                    if _pipeline is not None:
+                    # Route through whichever speech layer this phone selected;
+                    # turn_done still goes to the client as text/state.
+                    if openai_bridge is not None:
+                        await openai_bridge.speak_text(pending)
+                    elif _pipeline is not None:
                         _pipeline.add_delta(pending)
                         _pipeline.finish_turn()
                     await websocket.send_json(
@@ -431,18 +506,25 @@ async def ws_endpoint(websocket: WebSocket):
                     )
 
             elif typ == "user_text":
-                text = (msg.get("text") or "").strip()
-                if not text:
+                await submit_user_text(msg.get("text") or "")
+
+            elif typ == "audio_frame":
+                if openai_bridge is None:
                     continue
-                _broadcast(json.dumps({"type": "user", "text": text, "source": "ios"}))
-                sess = await asyncio.to_thread(_ensure_duplex, True)
-                await asyncio.to_thread(sess.send_user, text)
+                try:
+                    pcm = base64.b64decode(msg.get("pcm") or "", validate=True)
+                except (ValueError, TypeError):
+                    logger.warning("Dropped malformed phone audio frame")
+                    continue
+                await openai_bridge.append_audio(pcm)
 
             elif typ == "interrupt":
                 if _duplex_session is not None and _duplex_session.is_running:
                     await asyncio.to_thread(_duplex_session.interrupt)
                 if _pipeline is not None:
                     _pipeline.cancel()
+                if openai_bridge is not None:
+                    await openai_bridge.cancel_response()
 
             elif typ == "ping":
                 await websocket.send_json({"v": 1, "type": "pong"})
@@ -453,6 +535,10 @@ async def ws_endpoint(websocket: WebSocket):
         logger.exception("WS handler error")
     finally:
         sender_task.cancel()
+        if openai_bridge is not None:
+            _openai_bridges.discard(openai_bridge)
+            await openai_bridge.close()
+        _standard_ws_queues.discard(q)
         _ws_queues.discard(q)
         logger.info("WS client disconnected (%d remaining)", len(_ws_queues))
 
@@ -486,7 +572,10 @@ async def session_cancel():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "openai_realtime_configured": openai_realtime_configured(),
+    }
 
 
 @app.get("/settings")

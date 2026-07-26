@@ -37,6 +37,9 @@ final class AppState: ObservableObject {
     private var duplexEverStarted = false
     private var lastToolActivityAt: Date = .distantPast
     private var subscriptions = Set<AnyCancellable>()
+    private var openAIRealtimeRequested: Bool {
+        UserDefaults.standard.bool(forKey: "openAIRealtimeEnabled")
+    }
 
     // TTS mode announced by the server at connect. Defaults to client (on-device
     // AVSpeechSynthesizer) so behavior is unchanged when the server has no
@@ -44,6 +47,7 @@ final class AppState: ObservableObject {
     // which case assistant_delta events are text-only and audio arrives as
     // audio_frame / speak_text.
     private var ttsMode: ServerTTSMode = .client
+    private var standardTTSMode: ServerTTSMode = .client
 
     init() {
         voiceManager = VoiceManager()
@@ -70,6 +74,11 @@ final class AppState: ObservableObject {
         }
         voiceManager.onBargeIn = { [weak self] in
             self?.handleBargeIn()
+        }
+        voiceManager.onRealtimeAudio = { [weak self] pcm in
+            Task { @MainActor [weak self] in
+                self?.realtimeClient.sendAudioPCM(pcm)
+            }
         }
 
         realtimeClient.onEvent = { [weak self] event in
@@ -156,7 +165,10 @@ final class AppState: ObservableObject {
             await transition(to: .error("Could not reach the server. Retrying."))
             await transition(to: .conversing)
         }
-        realtimeClient.startSession(resume: resume)
+        realtimeClient.startSession(
+            resume: resume,
+            useOpenAIRealtime: openAIRealtimeRequested
+        )
     }
 
     // MARK: - Server events
@@ -172,6 +184,7 @@ final class AppState: ObservableObject {
             }
 
         case .disconnected:
+            voiceManager.setRealtimeAudioStreaming(false)
             voiceManager.enqueueSpeech("Connection dropped. Reconnecting. ")
 
         case .session(let id):
@@ -214,7 +227,10 @@ final class AppState: ObservableObject {
             voiceManager.enqueueSpeech("Server error: \(message). ")
 
         case .ttsMode(let mode, let sampleRate):
-            ttsMode = mode
+            standardTTSMode = mode
+            if ttsMode != .openAI {
+                ttsMode = mode
+            }
             AppLogger.shared.log("server TTS mode: \(mode.rawValue) rate=\(sampleRate)", tag: "TTS")
 
         case .audioFrame(_, let pcm, let sampleRate, let final):
@@ -228,6 +244,15 @@ final class AppState: ObservableObject {
 
         case .ttsFlush:
             voiceManager.flushSpeech()
+
+        case .voiceMode(let mode, let reason):
+            let openAIActive = mode == ServerTTSMode.openAI.rawValue
+            ttsMode = openAIActive ? .openAI : standardTTSMode
+            voiceManager.setRealtimeAudioStreaming(openAIActive)
+            if openAIRealtimeRequested && !openAIActive, let reason {
+                AppLogger.shared.log("OpenAI Realtime fallback: \(reason)", tag: "TTS")
+                voiceManager.enqueueSpeech("OpenAI voice is unavailable. Using standard voice. ")
+            }
         }
     }
 
@@ -294,6 +319,7 @@ final class AppState: ObservableObject {
         realtimeClient.sendInterrupt()
         voiceManager.flushSpeech()
         voiceManager.stopDuplex()
+        voiceManager.setRealtimeAudioStreaming(false)
         realtimeClient.disconnect()
         sessionManager.clearSession()
         // Kill any lingering non-duplex subprocess too.

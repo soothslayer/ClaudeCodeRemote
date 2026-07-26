@@ -10,6 +10,7 @@ import AVFoundation
 struct SettingsView: View {
 
     @AppStorage("serverURL") private var serverURL: String = ""
+    @AppStorage("openAIRealtimeEnabled") private var openAIRealtimeEnabled = false
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var logger = AppLogger.shared
     @State private var urlDraft: String = ""
@@ -94,6 +95,15 @@ struct SettingsView: View {
                     Text("Speech")
                 } footer: {
                     Text("Tap to pick a voice. For dramatically better quality, download Premium or Enhanced English voices in the iPhone's Settings → Accessibility → Spoken Content → Voices → English.")
+                        .font(.footnote)
+                }
+
+                Section {
+                    Toggle("OpenAI Realtime Voice", isOn: $openAIRealtimeEnabled)
+                } header: {
+                    Text("Experimental Voice")
+                } footer: {
+                    Text("Opt in to low-latency OpenAI speech, transcription, and barge-in. The bot server must have OPENAI_API_KEY in its gitignored bot/.env file. The key is never stored in or sent to this app. If unavailable, the next call automatically uses the standard voice path.")
                         .font(.footnote)
                 }
 

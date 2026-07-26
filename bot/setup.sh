@@ -51,6 +51,7 @@ if [ ! -f .env ]; then
     echo ""
     echo "Created .env from .env.example."
     echo ">>> Open bot/.env and add your TELEGRAM_BOT_TOKEN (optional but recommended)."
+    echo ">>> OPENAI_API_KEY is optional and enables opt-in Realtime voice; leave it blank for standard voice."
 fi
 
 # ── 6. ngrok ────────────────────────────────────────────────────────────────
@@ -152,4 +153,8 @@ echo ""
 echo "To receive Telegram push notifications:"
 echo "  1. Create a Telegram bot via @BotFather and add the token to bot/.env"
 echo "  2. Send /start to your new bot on Telegram — it will register your chat ID automatically"
+echo ""
+echo "Optional OpenAI Realtime voice:"
+echo "  Add OPENAI_API_KEY to bot/.env, then enable OpenAI Realtime Voice in the iPhone app."
+echo "  Leave it blank to preserve the standard phone-call path."
 echo ""

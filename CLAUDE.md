@@ -58,6 +58,13 @@ AVSpeechSynthesizer.write() → PCM        │                --input-format str
 - **Streaming:** the server keeps ONE long-lived Claude subprocess (`claude_session.py`) per conversation. It emits `stream_event` deltas which the server normalizes into `assistant_delta` WebSocket events; the phone speaks each completed sentence as it arrives instead of waiting for the whole turn.
 - **Interrupts:** speech in the middle of a turn is sent as `user_text` steering (the CLI accepts stream-json input mid-run). Saying only "stop"/"cancel" — or long-pressing 0.8 s — sends a `control_request:{subtype:"interrupt"}` that aborts the current turn without killing the process.
 - **Transport:** WebSocket at `/ws` rides the same ngrok tunnel. The HTTP endpoints (`/session/new`, `/message`, `/info`, `/cancel`, `/settings`, `/qr`, `/activity`) are kept so nothing breaks and so `/activity` can still watch the conversation.
+- **Optional OpenAI Realtime voice:** when the phone opts in and the bot has
+  `OPENAI_API_KEY`, the existing app WebSocket also carries PCM16 microphone
+  frames. The trusted bot opens the authenticated server-to-server Realtime
+  socket for VAD/transcription and streamed speech; transcribed turns still go
+  to the persistent Claude Code process. The key never reaches iOS. Missing or
+  failed configuration falls back to the standard SFSpeech + Kokoro/on-device
+  path for that call.
 - **Reconnect safety:** if the phone drops off mid-run the server's persistent process finishes anyway; the reply is stashed as `pending_response` in `session.json` and delivered as a `turn_done` on the next WebSocket connect. Session IDs from the Claude CLI persist across restarts via `session.json` (server) and `UserDefaults` (iOS).
 
 ---
@@ -167,6 +174,7 @@ server-side interrupt (`POST /session/cancel`) that the shake gesture calls.
 | `claude_runner.py` | `start_claude`/`collect_claude`/`kill_claude` | Kept for the legacy per-turn HTTP endpoints (unused by the duplex loop) |
 | `tts_kokoro.py` | `KokoroTTS` | Async client for Kokoro-FastAPI. `check_available()` probes `/v1/models` at startup; `synthesize(text)` posts to `/v1/audio/speech` with `response_format=pcm` and yields raw PCM16 mono 24 kHz chunks |
 | `tts_pipeline.py` | `SentencePipeline` | Server-side sentence chunker mirroring iOS's `drainAccumulator`. Consumes `assistant_delta` text via `add_delta()`, dispatches each finished sentence through Kokoro, emits `audio_frame` events (or `speak_text` on synth failure). `cancel()` on interrupt drops queued sentences and aborts the in-flight synth |
+| `openai_realtime.py` | `OpenAIRealtimeBridge` | Optional server-to-server OpenAI Realtime speech bridge. Accepts phone PCM, forwards completed transcripts to Claude, and queues streamed Claude sentences for voiced playback without exposing the API key |
 | `telegram_notifier.py` | `send_message`/`poll_and_register` | Unchanged Telegram push layer |
 
 **Session file schema (`session.json`):**
@@ -182,12 +190,14 @@ server-side interrupt (`POST /session/cancel`) that the shake gesture calls.
 **WebSocket protocol (v1):**
 
 Client → server (JSON per frame):
-- `{"type":"start","resume":bool}` — attach/create the persistent session
+- `{"type":"start","resume":bool,"voice_mode":"standard"|"openai_realtime"}` — attach/create the persistent session and request a voice path
 - `{"type":"user_text","text":"…"}` — user utterance (steers mid-turn if working, starts a new turn if idle)
+- `{"type":"audio_frame","sample_rate":24000,"pcm":"<base64>"}` — opt-in OpenAI path only; PCM16 mono microphone chunk
 - `{"type":"interrupt"}` — abort the current turn
 - `{"type":"ping"}`
 
 Server → client (JSON per frame; every message carries `"v":1`):
+- `{"type":"voice_mode","mode":"standard"|"openai_realtime","reason":"…"}` — confirms the requested path; a reason is included when OpenAI falls back
 - `{"type":"tts_mode","mode":"server"|"client","sample_rate":24000}` — sent once at connect: `"server"` means Kokoro is driving TTS and the client must ignore `assistant_delta` for playback; `"client"` (or absent) means fall back to on-device TTS
 - `{"type":"session","session_id":"…"}`
 - `{"type":"assistant_delta","text":"…"}` — text stream (always sent; used for transcript/logging even in server mode)
@@ -208,6 +218,11 @@ Server → client (JSON per frame; every message carries `"v":1`):
 - `KOKORO_VOICE` — default `af_heart`. Any voice id Kokoro-FastAPI knows works
 - `KOKORO_SPEED` — default `1.0`
 - `KOKORO_DISABLE` — set to `1` to force client-side TTS even when Kokoro is running
+- `OPENAI_API_KEY` — optional; stored only in gitignored `bot/.env`. Enables the
+  Realtime voice path when the phone also opts in
+- `OPENAI_REALTIME_MODEL` — optional model override (default
+  `gpt-realtime-2.1`)
+- `OPENAI_REALTIME_VOICE` — optional voice override (default `marin`)
 
 ---
 

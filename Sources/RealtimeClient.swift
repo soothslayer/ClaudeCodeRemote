@@ -13,6 +13,7 @@ import Foundation
 enum ServerTTSMode: String {
     case server
     case client
+    case openAI = "openai_realtime"
 }
 
 enum ServerEvent {
@@ -33,6 +34,8 @@ enum ServerEvent {
     case speakText(String)
     /// Drop any buffered server audio (server-side interrupt / cancel).
     case ttsFlush
+    /// The server accepted or declined the optional OpenAI speech path.
+    case voiceMode(mode: String, reason: String?)
 }
 
 @MainActor
@@ -51,6 +54,7 @@ final class RealtimeClient: NSObject, ObservableObject {
     private var shouldRun = false
     private var hasStartedSession = false
     private var lastResumeFlag = true
+    private var lastUseOpenAIRealtime = false
 
     private let urlSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -78,10 +82,15 @@ final class RealtimeClient: NSObject, ObservableObject {
         isConnected = false
     }
 
-    func startSession(resume: Bool) {
+    func startSession(resume: Bool, useOpenAIRealtime: Bool = false) {
         hasStartedSession = true
         lastResumeFlag = resume
-        send(["type": "start", "resume": resume])
+        lastUseOpenAIRealtime = useOpenAIRealtime
+        send([
+            "type": "start",
+            "resume": resume,
+            "voice_mode": useOpenAIRealtime ? "openai_realtime" : "standard",
+        ])
     }
 
     func sendUserText(_ text: String) {
@@ -90,6 +99,18 @@ final class RealtimeClient: NSObject, ObservableObject {
 
     func sendInterrupt() {
         send(["type": "interrupt"])
+    }
+
+    /// Streams PCM16 mono 24 kHz microphone audio to the bot. The bot ignores
+    /// these frames unless this call opted into and successfully connected to
+    /// OpenAI Realtime, so the standard phone-call path remains unchanged.
+    func sendAudioPCM(_ pcm: Data) {
+        guard !pcm.isEmpty else { return }
+        send([
+            "type": "audio_frame",
+            "sample_rate": 24_000,
+            "pcm": pcm.base64EncodedString(),
+        ])
     }
 
     private func send(_ payload: [String: Any]) {
@@ -151,7 +172,7 @@ final class RealtimeClient: NSObject, ObservableObject {
 
         // Re-attach the session after a drop so pending responses flow in.
         if isReconnect && hasStartedSession {
-            startSession(resume: true)
+            startSession(resume: true, useOpenAIRealtime: lastUseOpenAIRealtime)
         }
         onEvent?(.connected(reconnect: isReconnect))
         return true
@@ -231,6 +252,7 @@ final class RealtimeClient: NSObject, ObservableObject {
         let seq: Int?
         let pcm: String?
         let final: Bool?
+        let reason: String?
     }
 
     private func handle(_ raw: String) {
@@ -265,6 +287,8 @@ final class RealtimeClient: NSObject, ObservableObject {
             if let text = evt.text, !text.isEmpty { onEvent?(.speakText(text)) }
         case "tts_flush":
             onEvent?(.ttsFlush)
+        case "voice_mode":
+            onEvent?(.voiceMode(mode: evt.mode ?? "standard", reason: evt.reason))
         default:
             break   // pong etc.
         }

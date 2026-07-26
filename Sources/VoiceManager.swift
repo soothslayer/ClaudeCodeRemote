@@ -33,6 +33,9 @@ final class VoiceManager: NSObject, ObservableObject {
     var onUtterance: ((String) -> Void)?
     /// The user started talking over TTS; the speech queue was just flushed.
     var onBargeIn: (() -> Void)?
+    /// PCM16 mono 24 kHz microphone chunks for the opt-in server-side OpenAI
+    /// Realtime path. Nil/disabled leaves the existing SFSpeech path untouched.
+    var onRealtimeAudio: ((Data) -> Void)?
 
     // MARK: Audio graph
 
@@ -49,6 +52,9 @@ final class VoiceManager: NSObject, ObservableObject {
     /// enabled).
     private var playbackFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
     private var aecEnabled = false
+    private var realtimeAudioStreaming = false
+    private var realtimeCaptureConverter: AVAudioConverter?
+    private var realtimeCaptureSourceFormat: AVAudioFormat?
 
     // MARK: TTS queue
 
@@ -182,7 +188,14 @@ final class VoiceManager: NSObject, ObservableObject {
         log.log("mic tap format: \(micFormat)", tag: "DUPLEX")
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: micFormat) { [weak self] buffer, _ in
             guard buffer.frameLength > 0 else { return }
-            self?.recognitionRequest?.append(buffer)
+            guard let self else { return }
+            if self.realtimeAudioStreaming && !self.isMuted {
+                if let pcm = self.realtimePCM(from: buffer) {
+                    self.onRealtimeAudio?(pcm)
+                }
+            } else {
+                self.recognitionRequest?.append(buffer)
+            }
         }
 
         engine.prepare()
@@ -227,11 +240,29 @@ final class VoiceManager: NSObject, ObservableObject {
         } else if isDuplexRunning {
             if backgroundMicReleased {
                 reactivateEngine()
-            } else {
+            } else if !realtimeAudioStreaming {
                 startRecognitionCycle()
             }
             log.log("unmuted — recognizer restarted", tag: "DUPLEX")
         }
+    }
+
+    /// Switch the microphone between the existing Apple speech recognizer and
+    /// raw PCM streaming. The server only requests this after it has confirmed
+    /// an OpenAI Realtime connection, so missing/invalid server configuration
+    /// automatically leaves the original path active.
+    func setRealtimeAudioStreaming(_ enabled: Bool) {
+        guard realtimeAudioStreaming != enabled else { return }
+        realtimeAudioStreaming = enabled
+        if enabled {
+            endRecognitionCycle(deliver: false)
+        } else if isDuplexRunning && !isMuted {
+            startRecognitionCycle()
+        }
+        AppLogger.shared.log(
+            "microphone path: \(enabled ? "OpenAI Realtime PCM" : "SFSpeech")",
+            tag: "DUPLEX"
+        )
     }
 
     /// Rebuild the audio session + engine after a background release. Safe to
@@ -251,7 +282,9 @@ final class VoiceManager: NSObject, ObservableObject {
                 try engine.start()
             }
             backgroundMicReleased = false
-            startRecognitionCycle()
+            if !realtimeAudioStreaming {
+                startRecognitionCycle()
+            }
             log.log("engine reactivated after background release", tag: "DUPLEX")
         } catch {
             log.log("engine reactivation failed: \(error)", tag: "DUPLEX")
@@ -353,6 +386,44 @@ final class VoiceManager: NSObject, ObservableObject {
             memcpy(dst, src, sampleCount * MemoryLayout<Int16>.size)
         }
         return buffer
+    }
+
+    /// Convert the current hardware microphone format to the Realtime API's
+    /// required 24 kHz mono little-endian PCM16 format.
+    private func realtimePCM(from buffer: AVAudioPCMBuffer) -> Data? {
+        let target = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 24_000,
+            channels: 1,
+            interleaved: true
+        )!
+        if realtimeCaptureConverter == nil || realtimeCaptureSourceFormat != buffer.format {
+            realtimeCaptureConverter = AVAudioConverter(from: buffer.format, to: target)
+            realtimeCaptureSourceFormat = buffer.format
+        }
+        guard let converter = realtimeCaptureConverter else { return nil }
+        let ratio = target.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
+        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else {
+            return nil
+        }
+        var supplied = false
+        var conversionError: NSError?
+        let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
+            if supplied {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            supplied = true
+            inputStatus.pointee = .haveData
+            return buffer
+        }
+        guard status != .error, output.frameLength > 0,
+              let pointer = output.audioBufferList.pointee.mBuffers.mData else {
+            return nil
+        }
+        let byteCount = Int(output.frameLength) * MemoryLayout<Int16>.size
+        return Data(bytes: pointer, count: byteCount)
     }
 
     private func convertToPlaybackFormat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
@@ -631,7 +702,7 @@ final class VoiceManager: NSObject, ObservableObject {
 
     private func startRecognitionCycle() {
         let log = AppLogger.shared
-        guard isDuplexRunning, !isMuted else {
+        guard isDuplexRunning, !isMuted, !realtimeAudioStreaming else {
             log.log("cycle skipped (duplex=\(isDuplexRunning) muted=\(isMuted))", tag: "STT")
             return
         }
@@ -786,7 +857,7 @@ final class VoiceManager: NSObject, ObservableObject {
             }
         }
 
-        if isDuplexRunning && !isMuted {
+        if isDuplexRunning && !isMuted && !realtimeAudioStreaming {
             startRecognitionCycle()
         }
     }
@@ -813,7 +884,9 @@ final class VoiceManager: NSObject, ObservableObject {
                 if !self.engine.isRunning {
                     try? self.engine.start()
                 }
-                self.startRecognitionCycle()
+                if !self.realtimeAudioStreaming {
+                    self.startRecognitionCycle()
+                }
                 AppLogger.shared.log("recovered from audio interruption", tag: "DUPLEX")
             @unknown default:
                 break

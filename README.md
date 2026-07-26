@@ -5,8 +5,8 @@ Your friend speaks → Claude Code thinks → the response is read aloud.
 
 ```
 iPhone mic → iOS app → bot server (your Mac) → claude CLI → response → iOS TTS
-                     ↑
-               (HTTP over ngrok)
+                     ↑              ↕ optional
+              (WS over ngrok)   OpenAI Realtime voice
 ```
 
 ---
@@ -71,6 +71,22 @@ ngrok http 8080
 ```
 
 The server stays running while your friend uses the app. You can keep a terminal open or run it with `nohup python server.py &`.
+
+### Optional OpenAI Realtime voice
+
+The default phone-call behavior does not require OpenAI and is unchanged. To
+opt into lower-latency server VAD, transcription, streamed speech, and barge-in:
+
+1. Put `OPENAI_API_KEY` in `bot/.env` on the Mac. Do not put it in the iOS app
+   or commit it; `bot/.env` and local variants are ignored by Git.
+2. Run `bash setup.sh` again (or install the updated `bot/requirements.txt`).
+3. In the iOS app, long-press → Settings → enable **OpenAI Realtime Voice**.
+4. Reconnect the call.
+
+The bot keeps Claude Code as the coding agent. OpenAI Realtime is used only as
+the full-duplex speech layer. If the key is missing or the Realtime connection
+cannot be opened, the server tells the app to use its existing SFSpeech plus
+Kokoro/on-device TTS path automatically. The API key never leaves the bot.
 
 ---
 
