@@ -1,135 +1,109 @@
 # Claude Code Remote — Project Guide
 
-Voice-only iOS app that lets a blind user hold a full-duplex, interruptible
-conversation with Claude Code running on a remote computer. A Python bot
-server bridges the phone to the Claude CLI; Telegram is retained for push
-notifications when the app is fully backgrounded.
+Voice-only iOS app that lets a blind user **call Claude Code like a phone contact**. The app is a VoIP client (CallKit) whose only contact is Claude Code running on a remote Mac; a Python bot server bridges the call to a persistent Claude Code CLI process over a WebSocket.
 
 ---
 
 ## Architecture
 
 ```
-iPhone (iOS app)                        Mac (bot/)
-────────────────                        ──────────
-AVAudioEngine (voice-processed I/O)     FastAPI server (server.py)
- ├─ mic tap ──► SFSpeech (continuous)    ├─ /ws  (WebSocket, JSON, v1)
- │               ▼                       │       ▲            │
- │        RealtimeClient (WS) ──────────►│  user_text /       │
- │               ▲                       │  interrupt         ▼
- │  session / assistant_delta / ◄────────┤              claude_session.py
- │  tool_activity / turn_done / status   │              persistent process:
- ▼                                       │              claude --print
-AVSpeechSynthesizer.write() → PCM        │                --input-format stream-json
-  → AVAudioPlayerNode (same engine,      │                --output-format stream-json
-    so AEC cancels TTS from mic)         │                --include-partial-messages
-                                         │
-                                         └─ HTTP endpoints kept for legacy
-                                            /session/new /message /info /cancel
-                                            (also serves /activity, /qr)
-
-                                         telegram_notifier.py — push only
+iPhone (iOS app)
+  │  user taps Call (or just opens the app)
+  ▼
+CallManager (CallKit)
+  │  CXStartCallAction → system activates AVAudioSession
+  ▼
+VoiceManager (full-duplex AVAudioEngine)
+  │  ringback tone plays while…
+  ▼
+RealtimeClient ──── WebSocket /ws ────► FastAPI server (bot/server.py)  [Mac]
+  │                                          │
+  │  user_text / interrupt        ▲          ▼
+  │  assistant_delta / tool_activity   claude_session.py
+  │  turn_done / status                ONE persistent process:
+  │                                    claude --print --input-format stream-json
+  │                                           --output-format stream-json
+  │                                           [--resume <id>]
+  ▼                                          │
+VoiceManager speaks deltas as they stream    └── computer_use_mcp.py sidecar
+(mic stays live — barge-in interrupts)           (mouse/keyboard/screenshot MCP)
 ```
 
 **Key design decisions:**
-- **Full duplex:** iOS `AVAudioEngine` with `setVoiceProcessingEnabled(true)` on the input node gives hardware echo cancellation, so the mic can stay open while TTS plays. Both mic tap and playback (`AVAudioPlayerNode`) live on the same engine — TTS is rendered offline via `AVSpeechSynthesizer.write(_:)` into PCM and scheduled on the player node, giving the AEC an accurate reference signal and letting `playerNode.stop()` provide instant barge-in.
-- **Streaming:** the server keeps ONE long-lived Claude subprocess (`claude_session.py`) per conversation. It emits `stream_event` deltas which the server normalizes into `assistant_delta` WebSocket events; the phone speaks each completed sentence as it arrives instead of waiting for the whole turn.
-- **Interrupts:** speech in the middle of a turn is sent as `user_text` steering (the CLI accepts stream-json input mid-run). Saying only "stop"/"cancel" — or long-pressing 0.8 s — sends a `control_request:{subtype:"interrupt"}` that aborts the current turn without killing the process.
-- **Transport:** WebSocket at `/ws` rides the same ngrok tunnel. The HTTP endpoints (`/session/new`, `/message`, `/info`, `/cancel`, `/settings`, `/qr`, `/activity`) are kept so nothing breaks and so `/activity` can still watch the conversation.
-- **Reconnect safety:** if the phone drops off mid-run the server's persistent process finishes anyway; the reply is stashed as `pending_response` in `session.json` and delivered as a `turn_done` on the next WebSocket connect. Session IDs from the Claude CLI persist across restarts via `session.json` (server) and `UserDefaults` (iOS).
+- **Every conversation is a real CallKit call** — outgoing `CXStartCallAction` to the generic handle "Claude Code". This buys the native lock-screen call UI (fully VoiceOver accessible), the green in-call pill, call-grade background audio priority, and AirPods/Bluetooth mute controls for free. If CallKit refuses the call, the app silently falls back to plain in-app audio.
+- **Full-duplex audio** — the mic stays live while TTS plays (echo-cancelled via voice processing). The user can talk over Claude at any time; barge-in flushes the speech queue.
+- **Phone-call mute semantics** — mute silences the *microphone only*; Claude keeps talking, exactly like muting yourself on a real call.
+- **Hanging up does not kill server-side work** — the persistent Claude process keeps running; calling back resumes the session (`--resume <id>`, persisted in `UserDefaults` on iOS and `session.json` on the server).
+- **A ringback tone** (440+480 Hz, US cadence, generated in code) plays while the WebSocket connects — eyes-free "it's dialing" feedback.
+- **Transport is a WebSocket** (`/ws`, JSON protocol v1) with auto-reconnect + backoff; responses that arrive while disconnected are stashed as `pending_response` and delivered on reconnect. The old HTTP endpoints remain for settings, cancel, and background recovery.
+- The server is exposed via **ngrok**; setup is a `clauderemote://setup?url=…` magic link or QR code — no manual typing.
+- No push notifications — Telegram integration was removed entirely.
 
 ---
 
 ## iOS App (`Sources/`)
 
-### Entry & lifecycle
+### Call & state machine
 
 | File | Key symbol | Purpose |
 |---|---|---|
-| `ClaudeCodeRemoteApp.swift` | `ClaudeCodeRemoteApp` | `@main` entry, attaches `AppDelegate` |
-| `AppDelegate.swift` | `AppDelegate` | APNs registration, background fetch handler, routes notification taps to `AppState` via `NotificationCenter` |
+| `ClaudeCodeRemoteApp.swift` | `ClaudeCodeRemoteApp` | `@main` entry, attaches minimal `AppDelegate` |
+| `AppState.swift` | `AppState` (`@MainActor ObservableObject`) | Central coordinator; owns `VoiceManager`, `CallManager`, `RealtimeClient`, `APIService`, `SessionManager` |
+| `AppState.swift` | `VoiceState` (enum) | `idle` → `dialing` → `onCall` (+ `error`); sub-states `isSpeaking`/`isListening`/`isWorking`/`isMuted` overlap during `onCall` |
+| `CallManager.swift` | `CallManager` | CallKit wrapper (`CXProvider` + `CXCallController`). Mute is single-sourced through `CXSetMutedCallAction` so app UI, lock screen, and AirPods stay in sync |
 
-### State machine
+**Call flow (`AppState`):**
+- `onAppear()` → permissions → auto-`placeCall(resume:)` (opening the app IS the intent to call)
+- `placeCall()` → `CallManager.startCall()` → CallKit activates the audio session → `callAudioActivated()` → start duplex engine → ringback → `RealtimeClient.connect()` → on success `reportConnected()`, greeting, `startSession(resume:)`
+- No answer → `failCall()` speaks the reason, reports the call failed
+- `hangUp()` → `CXEndCallAction` → `callDidEnd()` is the single teardown point (also fires for lock-screen End)
+- `toggleMute()` routes through CallKit; the actual mic change lands in `applyMute()` via the delegate
 
-| File | Key symbol | Purpose |
-|---|---|---|
-| `AppState.swift` | `AppState` (`@MainActor ObservableObject`) | Central coordinator; owns `VoiceManager`, `RealtimeClient`, `APIService`, `SessionManager`; runs the duplex event loop |
-| `AppState.swift` | `VoiceState` (enum) | Headline states: `idle` `connecting` `conversing` `error(String)` — the concurrent sub-states `isSpeaking / isListening / isWorking / isMuted` are published separately and can all be true at once during `.conversing` |
-| `RealtimeClient.swift` | `RealtimeClient` (`@MainActor`) | `URLSessionWebSocketTask` wrapper — maps `serverURL` https→wss, speaks the v1 JSON protocol, pings every 20 s, auto-reconnects with backoff |
-| `RealtimeClient.swift` | `ServerEvent` (enum) | `connected(reconnect:)` `disconnected` `session(id:)` `assistantDelta(String)` `toolActivity(String)` `turnDone(String)` `status(working:)` `serverError(String)` |
-
-**`AppState` method flow:**
-- `onAppear()` → requests permissions → `greet()`
-- `greet()` → speaks welcome → `listenForSessionChoice()`
-- `listenForSessionChoice()` → branches to `startNewSession()` or `continueSession()`
-- both branch to `listenAndSend()` — the core loop
-- `listenAndSend()` → STT → HTTP → TTS → `waitingForInput`
-- `handleTap()` — called on every screen tap; interrupts speech or re-enters `listenAndSend()`
-- `handleIncomingResponse()` — also called from notification observer when app wakes from background
+**Gestures (ContentView):** tap background/avatar = mute (or call from idle) · long-press 0.8 s = interrupt Claude · long-press 1.5 s = Settings · shake = hard reset (hang up, drop session, redial fresh). Saying "stop" / "cancel" while Claude works also interrupts.
 
 ### Voice I/O
 
 | File | Key symbol | Purpose |
 |---|---|---|
-| `VoiceManager.swift` | `VoiceManager` (`@MainActor`) | Full-duplex audio engine — mic and player node on one `AVAudioEngine` with voice-processing AEC. Continuous SFSpeech, streaming PCM TTS, sentence-chunked speech queue, barge-in |
-| `VoiceManager.swift` | `PlaybackCoordinator` (private) | Per-sentence bridge from the `AVSpeechSynthesizer.write()` callback thread to the player node; fires `onFinished` once synthesis is complete AND every buffer has played |
+| `VoiceManager.swift` | `VoiceManager` (`@MainActor`) | Full-duplex engine: one `AVAudioEngine` with voice-processing (AEC) on the input node; TTS rendered offline via `AVSpeechSynthesizer.write()` onto an `AVAudioPlayerNode`; `SFSpeechRecognizer` runs in ~50 s cycles with a 1.8 s silence endpoint |
 
-**`VoiceManager` public API:**
-- `requestPermissions() async -> Bool` — mic + speech recognition
-- `startDuplex() throws` — activates `.playAndRecord/.voiceChat`, enables `setVoiceProcessingEnabled(true)`, starts the engine and the first recognition cycle
-- `stopDuplex()` — tears everything down and releases the audio session
-- `setMuted(_ muted: Bool)` — stops feeding the recognizer without stopping the engine (tap-to-pause)
-- `enqueueSpeech(_ delta: String)` — feed streaming text; complete sentences are spoken as they form
-- `finishSpeech()` — turn's over, speak the remainder
-- `flushSpeech()` — silence the player node immediately and drop everything queued (used by barge-in)
-- `speakAndWait(_ text: String) async` — synthesize + play a full utterance and await completion
-- `onUtterance: (String) -> Void` — a finished user utterance after silence endpointing
-- `onBargeIn: () -> Void` — user started talking over TTS; the speech queue was just flushed
-
-**Sentence chunking:** deltas accumulate; `. `, `! `, `? ` or newline flushes a sentence; long clauses (>250 chars) flush without punctuation; markdown code fences (```…```) are announced as "code block omitted" instead of being read.
-
-**Continuous STT:** each `SFSpeechAudioBufferRecognitionRequest` runs until either a final result, a 1.8 s silence timer, or the 50 s cycle-restart timer (below Apple's ~60 s task cap). A fresh cycle starts immediately after — the mic tap keeps flowing to whatever request is current.
-
-**Barge-in:** while `isSpeaking` is true, the first partial result with ≥ 2 words or ≥ 4 letters that is not itself a substring of the last ~400 chars of spoken text triggers `flushSpeech()` and fires `onBargeIn`. The utterance is then delivered normally when silence endpointing completes.
-
-**Audio session:** `.playAndRecord`, mode `.voiceChat`, options `[.defaultToSpeaker, .allowBluetoothA2DP]` — activated once at `startDuplex()` and kept live. `AVAudioSession.interruptionNotification` handles phone calls / Siri and re-arms the graph on `.ended`.
+**`VoiceManager` essentials:**
+- `callKitOwnsSession` — when true, CallKit activates/deactivates the `AVAudioSession` (we only set the category in `configureCallAudioSession()`), and mute becomes mic-only
+- `startDuplex()` / `stopDuplex()` — build/tear down the audio graph; `resumeEngineIfNeeded()` recovers after CallKit re-activation (held call, Siri)
+- `enqueueSpeech(delta)` — streaming TTS, chunked into sentences; markdown sanitized; code blocks skipped ("Code block omitted")
+- `startRingback()` / `stopRingback()` — generated ringback loop on a dedicated player node
+- Barge-in: a real partial STT result while TTS plays flushes speech and steers Claude; echo of our own TTS is filtered
+- Voice picker: Settings lists installed English voices (premium → enhanced), persisted under `selectedVoiceId`
 
 ### Networking
 
-The realtime path is `RealtimeClient.swift` over `/ws`. `APIService.swift` is
-kept for Settings (`/settings`), the legacy HTTP fallback endpoints, and the
-server-side interrupt (`POST /session/cancel`) that the shake gesture calls.
+| File | Key symbol | Purpose |
+|---|---|---|
+| `RealtimeClient.swift` | `RealtimeClient` | WebSocket to `/ws` (http→ws, https→wss). Auto-reconnects with backoff; re-sends `start(resume:true)` after a drop so pending responses flow in; 20 s keepalive pings |
+| `RealtimeClient.swift` | `ServerEvent` (enum) | `connected` `disconnected` `session` `assistantDelta` `toolActivity` `turnDone` `status` `serverError` |
+| `APIService.swift` | `APIService` | HTTP for everything non-realtime: `/session/cancel`, `/settings` (get/post), `/settings/browse` (folder picker), plus legacy `/session/new`·`/session/message`·`/session/info` |
+
+**WebSocket protocol v1** (JSON, snake_case):
+- up: `start {resume}` · `user_text {text}` · `interrupt` · `ping`
+- down: `session {session_id}` · `assistant_delta {text}` · `tool_activity {text}` · `turn_done {text}` · `status {state: working|idle}` · `error {message}` · `pong`
+
+### Persistence, setup & support
 
 | File | Key symbol | Purpose |
 |---|---|---|
-| `APIService.swift` | `APIService` | HTTP client — settings, cancel, and legacy session endpoints; reads `serverURL` from `UserDefaults` on every call |
-| `APIService.swift` | `APIError` | `.serverNotConfigured` `.serverUnreachable` `.timeout` `.serverError(String)` |
-
-**HTTP endpoints called (legacy / control-plane):**
-- `GET/POST /settings` — server-side working directory
-- `POST /session/cancel` — kill any active subprocess (belt-and-braces on hard reset)
-
-### Persistence & notifications
-
-| File | Key symbol | Purpose |
-|---|---|---|
-| `SessionManager.swift` | `SessionManager` | Thin wrapper around `UserDefaults`; stores `lastClaudeSessionId` |
-| `NotificationManager.swift` | `NotificationManager` (singleton) | Requests notification permission, registers APNs, exposes `showLocalNotification()` |
+| `SessionManager.swift` | `SessionManager` | `UserDefaults` wrapper for `lastClaudeSessionId` |
+| `SettingsView.swift` | `SettingsView` | Server URL (paste / QR scan), working-directory picker (browses the server's home dir), voice picker, in-app log viewer. For sighted-caregiver setup |
+| `QRScannerView.swift` | `QRScannerView` | VisionKit QR scanner for the setup link |
+| `ShakeDetector.swift` | `onShake` modifier | Shake-to-reset via responder chain |
+| `AppLogger.swift` | `AppLogger.shared` | os.Logger + last 300 entries in memory for the Settings log viewer |
 
 ### UI
 
 | File | Key symbol | Purpose |
 |---|---|---|
-| `ContentView.swift` | `ContentView` | Full-screen SwiftUI view. Colors and ring animation composite the current sub-states (speaking, listening, working, muted) into one indicator |
-| `SettingsView.swift` | `SettingsView` | Server URL, working directory, session clear — for sighted caregiver setup only |
+| `ContentView.swift` | `ContentView` | Phone-call UI: contact header ("Claude Code" + live call timer), state avatar (color/icon per sub-state), call controls — green Call button when idle; Mute / Audio-route (`AVRoutePickerView`) / End on a call. All controls VoiceOver-labeled |
 
-**Gestures:**
-- **tap** → mute/unmute (from `.idle`/`.error` → start conversation)
-- **long press 0.8 s** → interrupt current work (only when `isWorking`)
-- **long press 1.5 s** → open Settings
-- **shake** → hard reset (stop everything, drop session, reconnect fresh)
-
-**State → color:** black=idle, indigo=connecting, green=listening (default), blue=Claude speaking, orange=Claude working, gray=muted, red=error.
+**Avatar colors:** green=listening/ready, blue=Claude talking, orange=working, gray=muted, indigo=dialing, red=error.
 
 ---
 
@@ -137,65 +111,43 @@ server-side interrupt (`POST /session/cancel`) that the shake gesture calls.
 
 | File | Key symbol | Purpose |
 |---|---|---|
-| `server.py` | FastAPI `app` | Main entry point. Owns `_duplex_session` (one `ClaudeSession`), exposes `/ws`, keeps HTTP `/session/*` and `/settings` and the `/activity` SSE + browser page |
-| `server.py` | `ws_endpoint(websocket)` | v1 JSON protocol — receives `start`/`user_text`/`interrupt`/`ping`, fans server events (`session`/`assistant_delta`/`tool_activity`/`turn_done`/`status`/`error`) to every connected client |
-| `server.py` | `_duplex_event(evt)` | Reader-thread event hook: persists session id and last response, stashes `pending_response` when nobody is connected, drives `_broadcast` for the /activity page |
-| `claude_session.py` | `ClaudeSession` | Persistent Claude process. `start()` spawns `claude --print --input-format stream-json --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions --mcp-config …` (optionally `--resume`); `send_user()` writes stream-json user messages to stdin (works mid-turn); `interrupt()` writes a `control_request:{subtype:"interrupt"}`; a background thread parses stdout into normalized events |
-| `claude_session.py` | `_tool_summary(name, input)` | Turns `tool_use` blocks into short spoken summaries — "Editing AppState.swift", "Running command: git status", etc. |
-| `claude_runner.py` | `start_claude`/`collect_claude`/`kill_claude` | Kept for the legacy per-turn HTTP endpoints (unused by the duplex loop) |
-| `telegram_notifier.py` | `send_message`/`poll_and_register` | Unchanged Telegram push layer |
+| `server.py` | FastAPI `app` | `WS /ws` (duplex), `POST /session/new·message·cancel`, `GET /session/info`, `GET/POST /settings`, `GET /settings/browse`, `GET /activity` (+ `/activity/stream` SSE, `POST /activity/send`), `GET /qr`, `GET /ngrok-url`, `GET /health` |
+| `claude_session.py` | `ClaudeSession` | ONE persistent `claude --print --input-format stream-json --output-format stream-json [--resume]` process. Mid-turn `user` messages steer the run; `control_request {interrupt}` aborts a turn without killing the process. Normalizes stdout into the WS event types; auto-restarts fresh if `--resume` fails |
+| `claude_runner.py` | `start_claude` / `collect_claude` / `kill_claude` | Legacy one-shot subprocess per prompt (`--output-format json`) — still used by the HTTP endpoints; survives client disconnect by stashing the result as `pending_response` |
+| `computer_use_mcp.py` | MCP stdio server | Gives Claude computer-use on the Mac: screenshot, click, type, key chords, scroll (via `cliclick` + AppleScript). Attached to every Claude process via inline `--mcp-config` |
+| `menu_bar.py` | `ClaudeRemoteApp` (rumps) | Menu-bar app: auto-starts uvicorn + ngrok at login (LaunchAgent, KeepAlive), shows status, Copy Magic Link / Open QR Page / Open Activity Window / Restart |
+| `setup.sh` | — | One-time: venv, deps, `cliclick`, LaunchAgent install |
 
-**Session file schema (`session.json`):**
-```json
-{
-  "session_id": "claude-session-uuid",
-  "last_response": "...",
-  "pending_response": null
-}
-```
-`pending_response` is set when a `turn_done` arrives and no WS client is connected; cleared next time a client sends `start` (delivered as a `turn_done` event) or `GET /session/info` is called.
+Claude runs with `--dangerously-skip-permissions` in a configurable working directory (`config.json`, default `~/git/buck`); changing `work_dir` from iOS Settings tears down the duplex session and announces the fresh start on the phone.
 
-**WebSocket protocol (v1):**
+**State files (`bot/`):**
+- `session.json` — `{session_id, last_response, pending_response}`; `pending_response` is read-once, delivered on the next `/ws` `start` or `GET /session/info`
+- `config.json` — `{work_dir}`
+- `.env` — `PORT` (default 8080)
 
-Client → server (JSON per frame):
-- `{"type":"start","resume":bool}` — attach/create the persistent session
-- `{"type":"user_text","text":"…"}` — user utterance (steers mid-turn if working, starts a new turn if idle)
-- `{"type":"interrupt"}` — abort the current turn
-- `{"type":"ping"}`
-
-Server → client (JSON per frame; every message carries `"v":1`):
-- `{"type":"session","session_id":"…"}`
-- `{"type":"assistant_delta","text":"…"}`
-- `{"type":"tool_activity","text":"Editing X"}`
-- `{"type":"turn_done","text":"…","session_id":"…"}`
-- `{"type":"status","state":"working"|"idle"}`
-- `{"type":"error","message":"…"}`
-- `{"type":"pong"}`
-
-**Environment variables (bot/.env):**
-- `TELEGRAM_BOT_TOKEN` — from @BotFather (optional; Telegram push won't work without it)
-- `TELEGRAM_USER_CHAT_ID` — manual override if auto-registration fails
-- `PORT` — default 8080
+**Operator surfaces:** `http://localhost:8080/activity` is a live browser view of every Claude stdout line (SSE) with a text box to type into the same session; `/qr` renders the magic-link QR for setup.
 
 ---
 
 ## Setup summary
 
 ```bash
-# Server (Mac)
-cd bot && bash setup.sh          # one-time: venv, deps, checks
+# Server (Mac) — option A: menu bar app (auto-start at login)
+cd bot && bash setup.sh          # one-time: venv, deps, cliclick, LaunchAgent
+# then use the ☁ menu bar icon → Copy Magic Link
+
+# Server — option B: manual
 source .venv/bin/activate
-python server.py                 # keep running
-ngrok http 8080                  # in another terminal; copy https:// URL
+python server.py                 # or: python menu_bar.py
+ngrok http 8080                  # separate terminal
 
 # iOS
-xcodegen generate                # only needed after adding/renaming Swift files
+xcodegen generate                # after adding/renaming Swift files
 open ClaudeCodeRemote.xcodeproj  # sign with Apple ID, run on device
-# Long press main screen → Settings → paste ngrok URL → Save
+# Setup: text the magic link (clauderemote://setup?url=…) to the phone,
+# or long-press → Settings → Scan QR Code (QR page: http://localhost:8080/qr)
 ```
 
-**To regenerate the Xcode project after adding files:**
-```bash
-xcodegen generate
-```
-All source files live flat in `Sources/` — XcodeGen picks them up automatically.
+All source files live flat in `Sources/` — XcodeGen (`brew install xcodegen`) picks them up automatically from `project.yml`.
+
+If `xcodebuild` fails from the CLI with a CoreSimulator version mismatch after an Xcode update, open Xcode once (or reboot) to let it finish installing; building to a device from the Xcode GUI is unaffected. If `xcode-select` points at CommandLineTools, prefix CLI builds with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.

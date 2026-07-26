@@ -1,12 +1,14 @@
 import Foundation
 import Combine
 
-// MARK: - Voice State (headline UI state — the coloured circle)
+// MARK: - Voice State (headline UI state)
+// The app is a VoIP client whose only contact is Claude Code. Every
+// conversation is a real CallKit call: dial → ringback → answered → on call.
 
 enum VoiceState: Equatable {
-    case idle           // pre-first-tap or muted between conversations
-    case connecting     // opening WebSocket to server
-    case conversing     // duplex live — sub-states expressed in isSpeaking/isListening/isWorking
+    case idle           // ready to call
+    case dialing        // CallKit call placed, ringback playing, WS connecting
+    case onCall         // duplex live — sub-states in isSpeaking/isListening/isWorking
     case error(String)
 }
 
@@ -19,8 +21,10 @@ final class AppState: ObservableObject {
     @Published private(set) var voiceState: VoiceState = .idle
     @Published private(set) var statusMessage: String = ""
     @Published private(set) var isRequestingPermissions = false
+    /// Set when the server answers; drives the in-call duration timer.
+    @Published private(set) var callConnectedAt: Date?
 
-    // Sub-states (all valid simultaneously during .conversing)
+    // Sub-states (all valid simultaneously during .onCall)
     @Published private(set) var isSpeaking = false          // TTS audible
     @Published private(set) var isListening = false         // mic hot + hearing user
     @Published private(set) var isWorking = false           // Claude Code is thinking
@@ -28,18 +32,22 @@ final class AppState: ObservableObject {
 
     // Collaborators
     let voiceManager: VoiceManager
+    let callManager: CallManager
     let realtimeClient: RealtimeClient
     let apiService: APIService
     let sessionManager: SessionManager
 
-    // Once true, tapping in .conversing toggles mute rather than re-issuing
-    // the greeting. Reset on shake/hard reset.
-    private var duplexEverStarted = false
+    private var everCalled = false
+    private var pendingResume = false
+    /// True when CallKit refused the call and we're running a plain in-app
+    /// conversation instead (old behaviour).
+    private var usingFallbackAudio = false
     private var lastToolActivityAt: Date = .distantPast
     private var subscriptions = Set<AnyCancellable>()
 
     init() {
         voiceManager = VoiceManager()
+        callManager = CallManager()
         realtimeClient = RealtimeClient()
         apiService = APIService()
         sessionManager = SessionManager()
@@ -55,7 +63,10 @@ final class AppState: ObservableObject {
             .store(in: &subscriptions)
         voiceManager.$isMuted
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.isMuted = $0 }
+            .sink { [weak self] in
+                self?.isMuted = $0
+                self?.refreshStatus()
+            }
             .store(in: &subscriptions)
 
         voiceManager.onUtterance = { [weak self] text in
@@ -67,6 +78,20 @@ final class AppState: ObservableObject {
 
         realtimeClient.onEvent = { [weak self] event in
             self?.handleServerEvent(event)
+        }
+
+        // CallKit callbacks — the system is the source of truth for the call.
+        callManager.onConfigureAudioSession = { [weak self] in
+            self?.voiceManager.configureCallAudioSession()
+        }
+        callManager.onAudioSessionActivated = { [weak self] in
+            self?.callAudioActivated()
+        }
+        callManager.onCallEnded = { [weak self] in
+            self?.callDidEnd()
+        }
+        callManager.onMuteChanged = { [weak self] muted in
+            self?.applyMute(muted)
         }
     }
 
@@ -96,7 +121,8 @@ final class AppState: ObservableObject {
             return
         }
 
-        await startConversation(resume: sessionManager.hasSession)
+        // Blind-first: opening the app IS the intent to call.
+        await placeCall(resume: sessionManager.hasSession)
     }
 
     // MARK: - Magic link (unchanged behaviour)
@@ -111,23 +137,92 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(serverURL, forKey: "serverURL")
         AppLogger.shared.log("Server URL set via magic link: \(serverURL)", tag: "LINK")
 
-        if !duplexEverStarted {
-            await voiceManager.speakAndWait("Server connected. Tap anywhere to start.")
+        if !everCalled {
+            await voiceManager.speakAndWait("Server connected. Tap Call to ring Claude Code.")
         }
     }
 
-    // MARK: - Conversation lifecycle
+    // MARK: - Placing the call
 
-    private func startConversation(resume: Bool) async {
-        duplexEverStarted = true
-        await transition(to: .connecting)
+    func placeCall(resume: Bool) async {
+        guard voiceState == .idle || isErrorState else { return }
+        everCalled = true
+        pendingResume = resume
+        usingFallbackAudio = false
+        await transition(to: .dialing)
 
-        // Start the duplex audio engine BEFORE speaking the greeting — that
-        // way the greeting flows through the same pipeline the rest of the
-        // conversation uses (single audio session state, mic already live for
-        // barge-in). Splitting greeting → then engine start caused the audio
-        // session to reconfigure between them, which on some Bluetooth routes
-        // left the mic silent.
+        voiceManager.callKitOwnsSession = true
+        let ok = await callManager.startCall()
+        if !ok {
+            // CallKit refused (rare — e.g. restricted region). Fall back to a
+            // plain in-app conversation exactly like the old app.
+            AppLogger.shared.log("CallKit unavailable — falling back to in-app audio", tag: "CALL")
+            voiceManager.callKitOwnsSession = false
+            usingFallbackAudio = true
+            await startFallbackConversation(resume: resume)
+        }
+        // else: flow continues in callAudioActivated() once CallKit
+        // activates the audio session.
+    }
+
+    private var isErrorState: Bool {
+        if case .error = voiceState { return true }
+        return false
+    }
+
+    /// CallKit activated the audio session — dial tone time.
+    private func callAudioActivated() {
+        // Re-activation mid-call (after a hold / Siri) — just resume.
+        guard !voiceManager.isDuplexRunning else {
+            voiceManager.resumeEngineIfNeeded()
+            return
+        }
+        guard voiceState == .dialing else { return }
+
+        Task { @MainActor in
+            do {
+                try voiceManager.startDuplex()
+            } catch {
+                await failCall("Could not start audio: \(error.localizedDescription)")
+                return
+            }
+
+            voiceManager.startRingback()
+            let connected = await realtimeClient.connect()
+            // The user may have hung up while it was ringing.
+            guard voiceState == .dialing else { return }
+            voiceManager.stopRingback()
+
+            if connected {
+                callManager.reportConnected()
+                callConnectedAt = Date()
+                await transition(to: .onCall)
+                await voiceManager.speakAndWait(
+                    pendingResume
+                        ? "Claude Code. Welcome back — I've still got our session."
+                        : "Claude Code here. What are we working on?"
+                )
+                realtimeClient.startSession(resume: pendingResume)
+            } else {
+                await failCall("Claude Code isn't answering. Make sure the server is running, then call again.")
+            }
+        }
+    }
+
+    /// The server never answered — speak the reason, then end the CallKit call.
+    private func failCall(_ msg: String) async {
+        voiceManager.stopRingback()
+        realtimeClient.disconnect()
+        await voiceManager.speakAndWait(msg)     // engine still up — speak first
+        callManager.reportFailed()               // no delegate round-trip; tear down here
+        voiceManager.stopDuplex()
+        voiceManager.callKitOwnsSession = false
+        callConnectedAt = nil
+        await transition(to: .error(msg))
+    }
+
+    /// Fallback path when CallKit refuses — the pre-VoIP behaviour.
+    private func startFallbackConversation(resume: Bool) async {
         do {
             try voiceManager.startDuplex()
         } catch {
@@ -136,20 +231,52 @@ final class AppState: ObservableObject {
             await voiceManager.speakAndWait(msg)
             return
         }
-        await transition(to: .conversing)
-
-        await voiceManager.speakAndWait(
-            resume
-                ? "Reconnecting to your session."
-                : "Starting a new session. Say hello when you're ready."
-        )
-
         let connected = await realtimeClient.connect()
-        if !connected {
-            await transition(to: .error("Could not reach the server. Retrying."))
-            await transition(to: .conversing)
+        if connected {
+            callConnectedAt = Date()
+            await transition(to: .onCall)
+            await voiceManager.speakAndWait(
+                resume
+                    ? "Reconnecting to your session."
+                    : "Starting a new session. Say hello when you're ready."
+            )
+            realtimeClient.startSession(resume: resume)
+        } else {
+            voiceManager.stopDuplex()
+            let msg = "Claude Code isn't answering. Make sure the server is running, then call again."
+            await transition(to: .error(msg))
+            await voiceManager.speakAndWait(msg)
         }
-        realtimeClient.startSession(resume: resume)
+    }
+
+    // MARK: - Ending the call
+
+    /// Hang up (End button, or lock-screen End via CallKit).
+    func hangUp() async {
+        if callManager.hasActiveCall {
+            await callManager.endCall()          // → perform(End) → callDidEnd()
+        } else if usingFallbackAudio {
+            callDidEnd()
+        }
+    }
+
+    /// Single teardown point — fires for every way a call can end.
+    /// Note: this does NOT interrupt server-side work. If Claude is mid-task
+    /// when you hang up, it keeps working; call back later and resume.
+    private func callDidEnd() {
+        AppLogger.shared.log("call ended", tag: "CALL")
+        voiceManager.stopRingback()
+        voiceManager.flushSpeech()
+        voiceManager.stopDuplex()
+        realtimeClient.disconnect()
+        voiceManager.callKitOwnsSession = false
+        usingFallbackAudio = false
+        callConnectedAt = nil
+        if voiceManager.isMuted { voiceManager.setMuted(false) }
+        // Synchronous on purpose — an async hop here could land AFTER a
+        // redial has already moved us to .dialing and stomp the new call.
+        voiceState = .idle
+        statusMessage = statusFor(.idle)
     }
 
     // MARK: - Server events
@@ -157,15 +284,14 @@ final class AppState: ObservableObject {
     private func handleServerEvent(_ event: ServerEvent) {
         switch event {
         case .connected(let reconnect):
-            if reconnect {
+            if reconnect, voiceState == .onCall {
                 voiceManager.enqueueSpeech("Reconnected. ")
-            }
-            if voiceState != .conversing {
-                Task { await transition(to: .conversing) }
             }
 
         case .disconnected:
-            voiceManager.enqueueSpeech("Connection dropped. Reconnecting. ")
+            if voiceState == .onCall {
+                voiceManager.enqueueSpeech("Connection dropped. Reconnecting. ")
+            }
 
         case .session(let id):
             sessionManager.saveSession(id: id)
@@ -189,12 +315,12 @@ final class AppState: ObservableObject {
                 voiceManager.finishSpeech()
             }
             isWorking = false
-            statusMessage = statusFor(voiceState)
+            refreshStatus()
 
         case .status(let working):
             isWorking = working
             if !working { lastToolActivityAt = .distantPast }
-            statusMessage = statusFor(voiceState)
+            refreshStatus()
 
         case .serverError(let message):
             AppLogger.shared.log("server error: \(message)", tag: "WS")
@@ -227,34 +353,40 @@ final class AppState: ObservableObject {
         return ["stop", "cancel", "stop claude", "cancel claude", "claude stop", "claude cancel"].contains(cleaned)
     }
 
+    // MARK: - Mute
+
+    /// Toggle mute. Routed through CallKit so the lock-screen button, AirPods,
+    /// and our UI all stay in sync; the mic change lands in applyMute().
+    func toggleMute() async {
+        guard voiceState == .onCall else { return }
+        let willMute = !isMuted
+        if callManager.hasActiveCall {
+            await callManager.requestMute(willMute)
+        } else {
+            applyMute(willMute)                  // fallback path — no CallKit
+        }
+    }
+
+    private func applyMute(_ muted: Bool) {
+        guard muted != voiceManager.isMuted else { return }
+        voiceManager.setMuted(muted)
+        // Phone-call mute is mic-only, so this confirmation is audible even
+        // while muted.
+        voiceManager.enqueueSpeech(muted ? "Muted. " : "Listening. ")
+        refreshStatus()
+    }
+
     // MARK: - Gestures
 
-    /// Tap: while conversing, toggle mute. Before the first conversation, start.
-    /// While showing an error, retry.
+    /// Background tap: idle/error → call; on call → toggle mute.
     func handleTap() async {
         switch voiceState {
-        case .idle:
-            await startConversation(resume: sessionManager.hasSession)
-
-        case .conversing:
-            let willMute = !isMuted
-            if willMute {
-                // Speak the confirmation BEFORE muting — otherwise the audio
-                // engine is already stopped and the confirmation would need
-                // the fallback path.
-                await voiceManager.speakAndWait("Muted.")
-                voiceManager.setMuted(true)
-            } else {
-                voiceManager.setMuted(false)
-                await voiceManager.speakAndWait("Listening.")
-            }
-
-        case .connecting:
-            // No-op — the connection attempt is already in flight.
+        case .idle, .error:
+            await placeCall(resume: sessionManager.hasSession)
+        case .onCall:
+            await toggleMute()
+        case .dialing:
             break
-
-        case .error:
-            await startConversation(resume: sessionManager.hasSession)
         }
     }
 
@@ -266,18 +398,22 @@ final class AppState: ObservableObject {
         voiceManager.enqueueSpeech("Stopping. ")
     }
 
-    /// Shake: full reset — cancel any turn, drop the session, restart fresh.
+    /// Shake: full reset — hang up, drop the session, redial fresh.
     func resetToStart() async {
         AppLogger.shared.log("resetToStart()", tag: "RESET")
         realtimeClient.sendInterrupt()
-        voiceManager.flushSpeech()
-        voiceManager.stopDuplex()
-        realtimeClient.disconnect()
         sessionManager.clearSession()
         // Kill any lingering non-duplex subprocess too.
         Task { [apiService] in await apiService.cancelSession() }
+        await hangUp()
+        // CXEndCallAction's perform (→ callDidEnd) can trail the transaction
+        // completion — wait for the teardown before redialing.
+        let deadline = Date().addingTimeInterval(3)
+        while callManager.hasActiveCall && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
         await voiceManager.speakAndWait("Starting over.")
-        await startConversation(resume: false)
+        await placeCall(resume: false)
     }
 
     // MARK: - Helpers
@@ -287,16 +423,20 @@ final class AppState: ObservableObject {
         statusMessage = statusFor(state)
     }
 
+    private func refreshStatus() {
+        statusMessage = statusFor(voiceState)
+    }
+
     private func statusFor(_ state: VoiceState) -> String {
         switch state {
-        case .idle:        return "Tap anywhere to start"
-        case .connecting:  return "Connecting…"
-        case .conversing:
-            if isMuted   { return "Muted — tap to unmute" }
-            if isWorking { return "Claude Code is working…" }
-            if isSpeaking { return "Speaking — talk anytime to interrupt" }
+        case .idle:        return everCalled ? "Call ended" : "Ready to call"
+        case .dialing:     return "Calling Claude Code…"
+        case .onCall:
+            if isMuted   { return "Muted — Claude can't hear you" }
+            if isWorking { return "Working on it…" }
+            if isSpeaking { return "Talking — speak anytime to interrupt" }
             if isListening { return "Listening…" }
-            return "Ready — speak anytime"
+            return "On call — speak anytime"
         case .error(let msg): return msg
         }
     }
