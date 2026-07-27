@@ -50,7 +50,6 @@ if [ ! -f .env ]; then
     cp .env.example .env
     echo ""
     echo "Created .env from .env.example."
-    echo ">>> Open bot/.env and add your TELEGRAM_BOT_TOKEN (optional but recommended)."
 fi
 
 # ── 6. ngrok ────────────────────────────────────────────────────────────────
@@ -148,8 +147,4 @@ echo ""
 echo "To view logs:   tail -f ~/Library/Logs/claude_remote.log"
 echo "To stop:        launchctl bootout gui/\$(id -u)/com.claudecoderemote.menubar"
 echo "To restart:     launchctl kickstart gui/\$(id -u)/com.claudecoderemote.menubar"
-echo ""
-echo "To receive Telegram push notifications:"
-echo "  1. Create a Telegram bot via @BotFather and add the token to bot/.env"
-echo "  2. Send /start to your new bot on Telegram — it will register your chat ID automatically"
 echo ""

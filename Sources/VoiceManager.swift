@@ -28,6 +28,12 @@ final class VoiceManager: NSObject, ObservableObject {
     @Published private(set) var isMuted = false
     @Published private(set) var isDuplexRunning = false
 
+    /// When true, the AVAudioSession's activate/deactivate lifecycle belongs
+    /// to CallKit (we still set the category, in configureCallAudioSession).
+    /// Also switches mute to phone-call semantics: mute silences the MIC only —
+    /// Claude keeps talking, exactly like muting yourself on a real call.
+    var callKitOwnsSession = false
+
     /// A finished user utterance (after silence endpointing). Main actor.
     var onUtterance: ((String) -> Void)?
     /// The user started talking over TTS; the speech queue was just flushed.
@@ -37,6 +43,7 @@ final class VoiceManager: NSObject, ObservableObject {
 
     private let engine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
+    private let ringbackNode = AVAudioPlayerNode()
     private let synthesizer = AVSpeechSynthesizer()
 
     /// UserDefaults key holding the AVSpeechSynthesisVoice.identifier the user
@@ -113,22 +120,39 @@ final class VoiceManager: NSObject, ObservableObject {
 
     // MARK: - Duplex lifecycle
 
+    /// Set the call-appropriate category WITHOUT activating the session.
+    /// Called from CallKit's perform(CXStartCallAction) — CallKit itself
+    /// activates the session and then tells us via didActivate.
+    func configureCallAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
+        try? session.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
+        )
+    }
+
     func startDuplex() throws {
         guard !isDuplexRunning else { return }
         let log = AppLogger.shared
 
         let session = AVAudioSession.sharedInstance()
-        // .allowBluetooth (HFP) is required for the mic to route through
-        // a Bluetooth headset. The symbol was renamed .allowBluetoothHFP in
-        // iOS 26 and the old name deprecated, but the raw value is stable —
-        // and without it, Bluetooth users get silent mic input.
-        let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
-        try session.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
-        )
-        try session.setActive(true)
+        if !callKitOwnsSession {
+            // .allowBluetooth (HFP) is required for the mic to route through
+            // a Bluetooth headset. The symbol was renamed .allowBluetoothHFP in
+            // iOS 26 and the old name deprecated, but the raw value is stable —
+            // and without it, Bluetooth users get silent mic input.
+            let hfp = AVAudioSession.CategoryOptions(rawValue: 1 << 2)
+            try session.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.defaultToSpeaker, .allowBluetoothA2DP, hfp]
+            )
+            try session.setActive(true)
+        }
+        // else: CallKit already configured (configureCallAudioSession) and
+        // activated the session — touching it here would fight the system.
 
         // Enable AEC on the input node BEFORE we query mainMixerNode's
         // format or attach any player nodes. Doing this after the mixer has
@@ -149,6 +173,8 @@ final class VoiceManager: NSObject, ObservableObject {
         let mixerFormat = engine.mainMixerNode.outputFormat(forBus: 0)
         playbackFormat = mixerFormat
         engine.connect(playerNode, to: engine.mainMixerNode, format: mixerFormat)
+        engine.attach(ringbackNode)
+        engine.connect(ringbackNode, to: engine.mainMixerNode, format: mixerFormat)
         log.log("mixer format: \(mixerFormat)", tag: "DUPLEX")
 
         // Mic tap — audio thread. Guard empty buffers (they arrive when the
@@ -173,11 +199,29 @@ final class VoiceManager: NSObject, ObservableObject {
     func stopDuplex() {
         guard isDuplexRunning else { return }
         isDuplexRunning = false
+        stopRingback()
         flushSpeech()
         endRecognitionCycle(deliver: false)
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if !callKitOwnsSession {
+            // With CallKit, the system deactivates the session after the call
+            // ends (didDeactivate) — deactivating it ourselves is an error.
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+
+    /// CallKit re-activated the session mid-call (e.g. after a held call or
+    /// Siri interruption) — kick the engine and recognizer back to life.
+    func resumeEngineIfNeeded() {
+        guard isDuplexRunning else { return }
+        if !engine.isRunning {
+            try? engine.start()
+        }
+        if !isMuted {
+            startRecognitionCycle()
+        }
+        AppLogger.shared.log("engine resumed after session re-activation", tag: "DUPLEX")
     }
 
     /// Mute the conversation. This actually **releases the microphone** —
@@ -190,6 +234,21 @@ final class VoiceManager: NSObject, ObservableObject {
         guard muted != isMuted else { return }
         isMuted = muted
         let log = AppLogger.shared
+
+        // Phone-call semantics while CallKit owns the session: mute silences
+        // the microphone only. The engine, session, and TTS all keep running —
+        // the call stays a call, and Claude keeps talking to you.
+        if callKitOwnsSession {
+            if muted {
+                endRecognitionCycle(deliver: false)
+                log.log("call-muted — mic recognition stopped", tag: "DUPLEX")
+            } else if isDuplexRunning {
+                startRecognitionCycle()
+                log.log("call-unmuted — mic recognition restarted", tag: "DUPLEX")
+            }
+            return
+        }
+
         if muted {
             endRecognitionCycle(deliver: false)
             flushSpeech()
@@ -217,13 +276,60 @@ final class VoiceManager: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Ringback tone
+    // A US-style ringback (440 Hz + 480 Hz, 2 s on / 4 s off) looped on its
+    // own player node while we dial the server. Pure VoIP theater — but it
+    // tells the user, eyes-free, exactly what's happening.
+
+    func startRingback() {
+        guard isDuplexRunning else { return }
+        guard let buffer = Self.makeRingbackBuffer(format: playbackFormat) else { return }
+        ringbackNode.stop()
+        ringbackNode.scheduleBuffer(buffer, at: nil, options: .loops)
+        if !engine.isRunning {
+            try? engine.start()
+        }
+        ringbackNode.play()
+        AppLogger.shared.log("ringback started", tag: "CALL")
+    }
+
+    func stopRingback() {
+        ringbackNode.stop()
+    }
+
+    private static func makeRingbackBuffer(format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let sampleRate = format.sampleRate
+        let totalFrames = AVAudioFrameCount(sampleRate * 6)          // 2 s tone + 4 s silence
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: totalFrames) else { return nil }
+        buffer.frameLength = totalFrames
+
+        let toneFrames = Int(sampleRate * 2)
+        let rampFrames = Int(sampleRate * 0.01)                      // 10 ms fade to avoid clicks
+        for channel in 0..<Int(format.channelCount) {
+            guard let data = buffer.floatChannelData?[channel] else { continue }
+            for i in 0..<Int(totalFrames) {
+                guard i < toneFrames else { data[i] = 0; continue }
+                let t = Double(i) / sampleRate
+                var sample = 0.4 * (sin(2 * .pi * 440 * t) + sin(2 * .pi * 480 * t)) / 2
+                if i < rampFrames {
+                    sample *= Double(i) / Double(rampFrames)
+                } else if i > toneFrames - rampFrames {
+                    sample *= Double(toneFrames - i) / Double(rampFrames)
+                }
+                data[i] = Float(sample)
+            }
+        }
+        return buffer
+    }
+
     // MARK: - TTS: streaming input
 
     /// Feed streaming text (deltas). Complete sentences are spoken as they form.
-    /// Dropped while muted — the user has told us to be quiet in both directions,
-    /// and buffering would produce a stale wall of TTS on unmute.
+    /// In the legacy (non-CallKit) path, speech is dropped while muted — the
+    /// user told us to be quiet in both directions. On a call, mute is
+    /// mic-only, so Claude keeps talking.
     func enqueueSpeech(_ delta: String) {
-        guard !isMuted else { return }
+        guard !isMuted || callKitOwnsSession else { return }
         deltaAccumulator += delta
         drainAccumulator(force: false)
         pumpSpeech()
@@ -231,7 +337,7 @@ final class VoiceManager: NSObject, ObservableObject {
 
     /// Turn is over — speak whatever is still buffered.
     func finishSpeech() {
-        guard !isMuted else { return }
+        guard !isMuted || callKitOwnsSession else { return }
         drainAccumulator(force: true)
         pumpSpeech()
     }

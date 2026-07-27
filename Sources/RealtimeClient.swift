@@ -116,9 +116,17 @@ final class RealtimeClient: NSObject, ObservableObject {
         ws.resume()
 
         // Probe with a ping — resume() alone doesn't tell us the socket is up.
+        // sendPing's handler can fire more than once (e.g. pong + a later
+        // cancellation error when the socket is invalidated), so guard the
+        // continuation with a one-shot flag on the main actor.
         let ok = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let flag = PingResumeFlag()
             ws.sendPing { error in
-                cont.resume(returning: error == nil)
+                Task { @MainActor in
+                    guard !flag.fired else { return }
+                    flag.fired = true
+                    cont.resume(returning: error == nil)
+                }
             }
         }
         guard gen == generation else { return false }
@@ -237,4 +245,9 @@ final class RealtimeClient: NSObject, ObservableObject {
             break   // pong etc.
         }
     }
+}
+
+@MainActor
+private final class PingResumeFlag {
+    var fired = false
 }
