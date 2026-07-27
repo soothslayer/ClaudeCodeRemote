@@ -166,6 +166,12 @@ final class AppState: ObservableObject {
         usingFallbackAudio = false
         await transition(to: .dialing)
 
+        // Speak immediately, in parallel with the CallKit transaction below —
+        // blind users get audible confirmation the app is doing something
+        // within milliseconds, instead of waiting on the (much quieter)
+        // ringback tone once the call audio session comes up.
+        Task { await voiceManager.speakAndWait("Calling Claude Code…") }
+
         voiceManager.callKitOwnsSession = true
         let ok = await callManager.startCall()
         if !ok {

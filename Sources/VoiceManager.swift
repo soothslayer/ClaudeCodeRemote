@@ -310,7 +310,7 @@ final class VoiceManager: NSObject, ObservableObject {
             for i in 0..<Int(totalFrames) {
                 guard i < toneFrames else { data[i] = 0; continue }
                 let t = Double(i) / sampleRate
-                var sample = 0.15 * (sin(2 * .pi * 440 * t) + sin(2 * .pi * 480 * t)) / 2
+                var sample = 0.4 * (sin(2 * .pi * 440 * t) + sin(2 * .pi * 480 * t)) / 2
                 if i < rampFrames {
                     sample *= Double(i) / Double(rampFrames)
                 } else if i > toneFrames - rampFrames {
