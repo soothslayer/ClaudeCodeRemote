@@ -45,6 +45,16 @@ final class AppState: ObservableObject {
     private var lastToolActivityAt: Date = .distantPast
     private var subscriptions = Set<AnyCancellable>()
 
+    // Eyes-free progress: while Claude works, long silences are broken with a
+    // short spoken heartbeat so the user knows the call is still alive.
+    private var workingHeartbeat: Task<Void, Never>?
+    private var lastAudibleActivityAt = Date()
+    private var heartbeatPhraseIndex = 0
+    private static let heartbeatPhrases = ["Still working. ", "Still on it. ", "Working. "]
+    /// Whether any assistant text has been spoken this turn — a turn that ends
+    /// without it gets a spoken "Done." so it never finishes silently.
+    private var turnHadAssistantSpeech = true
+
     init() {
         voiceManager = VoiceManager()
         callManager = CallManager()
@@ -55,7 +65,12 @@ final class AppState: ObservableObject {
         // Mirror VoiceManager's published sub-states so ContentView can react.
         voiceManager.$isSpeaking
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] in self?.isSpeaking = $0 }
+            .sink { [weak self] in
+                self?.isSpeaking = $0
+                // Any TTS transition counts as audible activity — the working
+                // heartbeat measures silence from the END of speech, not its start.
+                self?.lastAudibleActivityAt = Date()
+            }
             .store(in: &subscriptions)
         voiceManager.$isHearingUser
             .receive(on: DispatchQueue.main)
@@ -265,6 +280,8 @@ final class AppState: ObservableObject {
     /// when you hang up, it keeps working; call back later and resume.
     private func callDidEnd() {
         AppLogger.shared.log("call ended", tag: "CALL")
+        stopWorkingHeartbeat()
+        isWorking = false
         voiceManager.stopRingback()
         voiceManager.flushSpeech()
         voiceManager.stopDuplex()
@@ -297,6 +314,8 @@ final class AppState: ObservableObject {
             sessionManager.saveSession(id: id)
 
         case .assistantDelta(let text):
+            turnHadAssistantSpeech = true
+            lastAudibleActivityAt = Date()
             voiceManager.enqueueSpeech(text)
 
         case .toolActivity(let text):
@@ -304,20 +323,39 @@ final class AppState: ObservableObject {
             let now = Date()
             if now.timeIntervalSince(lastToolActivityAt) >= 30 {
                 lastToolActivityAt = now
+                lastAudibleActivityAt = now
                 voiceManager.enqueueSpeech(text + ". ")
             }
 
         case .turnDone(let final):
-            // Server's `result` — flush any remainder the deltas didn't cover.
             let sanitized = VoiceManager.sanitizeForSpeech(final)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sanitized.isEmpty {
-                voiceManager.finishSpeech()
+            if turnHadAssistantSpeech {
+                // Deltas covered the text — flush whatever they left buffered.
+                if !sanitized.isEmpty {
+                    voiceManager.finishSpeech()
+                }
+            } else if !sanitized.isEmpty {
+                // Deltas never arrived (e.g. reconnect mid-turn) — speak the
+                // final result so the turn isn't silently swallowed.
+                voiceManager.enqueueSpeech(final + "\n")
+            } else {
+                // Tools-only turn with no text at all — close the loop aloud.
+                voiceManager.enqueueSpeech("Done. ")
             }
+            lastAudibleActivityAt = Date()
             isWorking = false
+            stopWorkingHeartbeat()
             refreshStatus()
 
         case .status(let working):
+            if working && !isWorking {
+                turnHadAssistantSpeech = false
+                lastAudibleActivityAt = Date()
+                startWorkingHeartbeat()
+            } else if !working {
+                stopWorkingHeartbeat()
+            }
             isWorking = working
             if !working { lastToolActivityAt = .distantPast }
             refreshStatus()
@@ -326,6 +364,77 @@ final class AppState: ObservableObject {
             AppLogger.shared.log("server error: \(message)", tag: "WS")
             voiceManager.enqueueSpeech("Server error: \(message). ")
         }
+    }
+
+    // MARK: - Working heartbeat
+
+    /// While Claude works, break long silences with a short spoken phrase so
+    /// the user knows the call is alive. Checks every 10 s; speaks only after
+    /// ~25 s of true quiet (no TTS playing, no recent tool summary).
+    private func startWorkingHeartbeat() {
+        workingHeartbeat?.cancel()
+        workingHeartbeat = Task { [weak self] in
+            while true {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                guard self.isWorking, self.voiceState == .onCall else { return }
+                guard !self.voiceManager.isSpeaking,
+                      Date().timeIntervalSince(self.lastAudibleActivityAt) >= 25 else { continue }
+                let phrase = Self.heartbeatPhrases[self.heartbeatPhraseIndex % Self.heartbeatPhrases.count]
+                self.heartbeatPhraseIndex += 1
+                self.lastAudibleActivityAt = Date()
+                self.voiceManager.enqueueSpeech(phrase)
+            }
+        }
+    }
+
+    private func stopWorkingHeartbeat() {
+        workingHeartbeat?.cancel()
+        workingHeartbeat = nil
+    }
+
+    // MARK: - Spoken status
+
+    /// Speak the current call state and duration. Reachable eyes-free via the
+    /// "Read status aloud" VoiceOver action on the avatar.
+    func speakStatus() {
+        var parts: [String] = []
+        switch voiceState {
+        case .idle:
+            parts.append(everCalled
+                ? "Call ended. Double tap the call button to ring Claude Code again."
+                : "Ready to call Claude Code.")
+        case .dialing:
+            parts.append("Calling Claude Code now.")
+        case .error(let msg):
+            parts.append("Call failed. \(msg)")
+        case .onCall:
+            if let start = callConnectedAt {
+                parts.append("On call for \(Self.spokenDuration(since: start)).")
+            } else {
+                parts.append("On call.")
+            }
+            if isMuted { parts.append("You are muted — Claude can't hear you.") }
+            if isWorking { parts.append("Claude is working. Say stop to interrupt.") }
+            else if !isMuted { parts.append("Listening.") }
+        }
+        let text = parts.joined(separator: " ")
+        if voiceState == .onCall || voiceState == .dialing {
+            voiceManager.enqueueSpeech(text + "\n")
+        } else {
+            // No duplex engine off-call — use the fallback speech path.
+            Task { await voiceManager.speakAndWait(text) }
+        }
+    }
+
+    private static func spokenDuration(since start: Date) -> String {
+        let seconds = max(0, Int(Date().timeIntervalSince(start)))
+        let h = seconds / 3600, m = (seconds % 3600) / 60, s = seconds % 60
+        var parts: [String] = []
+        if h > 0 { parts.append("\(h) hour\(h == 1 ? "" : "s")") }
+        if m > 0 { parts.append("\(m) minute\(m == 1 ? "" : "s")") }
+        if h == 0 && (s > 0 || parts.isEmpty) { parts.append("\(s) second\(s == 1 ? "" : "s")") }
+        return parts.joined(separator: " ")
     }
 
     // MARK: - User speech

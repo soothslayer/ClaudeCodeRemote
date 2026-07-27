@@ -64,6 +64,17 @@ struct ContentView: View {
             guard !appState.isRequestingPermissions else { return }
             Task { await appState.resetToStart() }
         }
+        // Magic Tap (VoiceOver two-finger double tap) — answer/end, exactly
+        // like the Phone app: call when idle, hang up when dialing or on a call.
+        .accessibilityAction(.magicTap) {
+            guard !appState.isRequestingPermissions else { return }
+            switch appState.voiceState {
+            case .idle, .error:
+                Task { await appState.placeCall(resume: appState.sessionManager.hasSession) }
+            case .dialing, .onCall:
+                Task { await appState.hangUp() }
+            }
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
@@ -109,7 +120,19 @@ struct ContentView: View {
             }
             .font(.system(size: 19, weight: .regular))
         }
-        .accessibilityElement(children: .combine)
+        // One static element — the per-second timer stays visual-only so
+        // VoiceOver isn't fed a value that changes every second.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(headerAccessibilityLabel)
+    }
+
+    private var headerAccessibilityLabel: String {
+        switch appState.voiceState {
+        case .idle:    return "Claude Code. Ready to call."
+        case .dialing: return "Claude Code. Calling."
+        case .onCall:  return "Claude Code. On call."
+        case .error:   return "Claude Code. Call failed."
+        }
     }
 
     private static func durationString(from start: Date, to now: Date) -> String {
@@ -164,6 +187,18 @@ struct ContentView: View {
         .accessibilityLabel(avatarAccessibilityLabel)
         .accessibilityHint(avatarAccessibilityHint)
         .accessibilityAddTraits(.isButton)
+        // Everything the timed gestures do, reachable through the VoiceOver
+        // actions rotor — no 0.8 s / 1.5 s long presses required.
+        .accessibilityActions {
+            Button("Read status aloud") { appState.speakStatus() }
+            if appState.isWorking {
+                Button("Stop Claude") { appState.cancelProcessing() }
+            }
+            if appState.voiceState == .onCall {
+                Button("Start over") { Task { await appState.resetToStart() } }
+            }
+            Button("Open Settings") { showSettings = true }
+        }
         .onTapGesture {
             guard !appState.isRequestingPermissions else { return }
             Task { await appState.handleTap() }
@@ -178,6 +213,9 @@ struct ContentView: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 36)
             .animation(.none, value: appState.statusMessage)
+            // Visual-only: it mirrors what the avatar element already says, so
+            // exposing it would make VoiceOver walk the same state twice.
+            .accessibilityHidden(true)
     }
 
     // MARK: - Call controls
@@ -220,6 +258,9 @@ struct ContentView: View {
                     Task { await appState.toggleMute() }
                 }
                 .accessibilityLabel(appState.isMuted ? "Unmute microphone" : "Mute microphone")
+                .accessibilityHint(appState.isMuted
+                    ? "Claude will hear you again."
+                    : "Claude keeps talking; only your microphone goes quiet.")
 
                 audioRouteButton
 
@@ -248,6 +289,8 @@ struct ContentView: View {
             Text("Audio")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.white.opacity(0.85))
+                // The route picker exposes its own accessible button.
+                .accessibilityHidden(true)
         }
     }
 
@@ -323,9 +366,9 @@ struct ContentView: View {
 
     private var avatarAccessibilityHint: String {
         switch appState.voiceState {
-        case .idle, .error: return "Double tap to call Claude Code."
-        case .dialing:      return ""
-        case .onCall:       return "Double tap to mute or unmute. Shake to start over."
+        case .idle, .error: return "Double tap to call Claude Code. Or two-finger double tap anywhere."
+        case .dialing:      return "Two-finger double tap to cancel."
+        case .onCall:       return "Double tap to mute or unmute. Two-finger double tap to hang up."
         }
     }
 }
@@ -353,6 +396,9 @@ private struct CallControlButton: View {
             Text(label)
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.white.opacity(0.85))
+                // Caption duplicates the button's accessibility label — keep
+                // it visual-only so VoiceOver hears each control exactly once.
+                .accessibilityHidden(true)
         }
     }
 }

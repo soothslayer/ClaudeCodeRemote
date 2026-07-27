@@ -30,6 +30,7 @@ struct SettingsView: View {
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .accessibilityLabel("Bot server URL")
 
                     if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
                         Button {
@@ -50,6 +51,7 @@ struct SettingsView: View {
                         .autocapitalization(.none)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
+                        .accessibilityLabel("Working directory")
                         .overlay(alignment: .trailing) {
                             if isSavingWorkDir {
                                 ProgressView().padding(.trailing, 8)
@@ -423,11 +425,15 @@ struct VoicePickerView: View {
                 }
                 Spacer()
                 if isSelected {
-                    Image(systemName: "checkmark").foregroundColor(.accentColor)
+                    Image(systemName: "checkmark")
+                        .foregroundColor(.accentColor)
+                        .accessibilityHidden(true)   // conveyed via the isSelected trait
                 }
             }
             .contentShape(Rectangle())
         }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint("Double tap to choose this voice and hear a sample.")
     }
 
     // MARK: Grouping
