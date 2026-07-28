@@ -115,15 +115,20 @@ VoiceManager speaks deltas as they stream    └── computer_use_mcp.py sidec
 | `claude_session.py` | `ClaudeSession` | ONE persistent `claude --print --input-format stream-json --output-format stream-json [--resume]` process. Mid-turn `user` messages steer the run; `control_request {interrupt}` aborts a turn without killing the process. Normalizes stdout into the WS event types; auto-restarts fresh if `--resume` fails |
 | `claude_runner.py` | `start_claude` / `collect_claude` / `kill_claude` | Legacy one-shot subprocess per prompt (`--output-format json`) — still used by the HTTP endpoints; survives client disconnect by stashing the result as `pending_response` |
 | `computer_use_mcp.py` | MCP stdio server | Gives Claude computer-use on the Mac: screenshot, click, type, key chords, scroll (via `cliclick` + AppleScript). Attached to every Claude process via inline `--mcp-config` |
-| `menu_bar.py` | `ClaudeRemoteApp` (rumps) | Menu-bar app: auto-starts uvicorn + ngrok at login (LaunchAgent, KeepAlive), shows status, Copy Magic Link / Open QR Page / Open Activity Window / Restart |
-| `setup.sh` | — | One-time: venv, deps, `cliclick`, LaunchAgent install |
+| `menu_bar.py` | `ClaudeRemoteApp` (rumps) | Menu-bar app: runs uvicorn on a daemon thread, uses `NgrokSupervisor` to launch/restart ngrok (with configured static domain), file logs to `~/Library/Logs/ClaudeCodeRemote/`, menu items include Copy Magic Link, Configure ngrok (authtoken + static domain), Reveal Logs, Restart, Quit |
+| `ngrok_supervisor.py` | `NgrokSupervisor` | Threaded supervisor that launches ngrok, restarts on death (exponential backoff to 60 s), polls `http://127.0.0.1:4040/api/tunnels` for the public URL, and re-launches with a new `--domain` when the configured static domain changes |
+| `paths.py` | `config_dir`, `log_dir`, `ngrok_binary`, `migrate_legacy_state` | Runtime location helper — resolves writable dirs (`~/Library/Application Support/ClaudeCodeRemote/`, `~/Library/Logs/ClaudeCodeRemote/`) and locates the ngrok binary (bundled in `Contents/Resources/bin/ngrok` when running from the .app, else PATH). Migrates legacy `bot/config.json` / `bot/session.json` on first access |
+| `setup_app.py` | `py2app` recipe | Builds `ClaudeCodeRemote.app` — `LSUIElement=True` (menu-bar only), bundles the server + MCP sidecar + rumps UI + a copy of the ngrok binary if one is on the build machine |
+| `setup.sh` | — | One-time: venv, deps (incl. py2app), `cliclick`, builds `ClaudeCodeRemote.app` with py2app, copies to `/Applications/`, registers a LaunchAgent that runs `Contents/MacOS/ClaudeCodeRemote` |
 
 Claude runs with `--dangerously-skip-permissions` in a configurable working directory (`config.json`, default `~/git/buck`); changing `work_dir` from iOS Settings tears down the duplex session and announces the fresh start on the phone.
 
-**State files (`bot/`):**
+**State files (`~/Library/Application Support/ClaudeCodeRemote/`):**
 - `session.json` — `{session_id, last_response, pending_response}`; `pending_response` is read-once, delivered on the next `/ws` `start` or `GET /session/info`
-- `config.json` — `{work_dir}`
-- `.env` — `PORT` (default 8080)
+- `config.json` — `{work_dir, ngrok_static_domain}`
+- `.env` (in `bot/`) — `PORT` (default 8080)
+
+Legacy `bot/config.json` and `bot/session.json` are auto-migrated on first launch (see `paths.migrate_legacy_state`). Logs go to `~/Library/Logs/ClaudeCodeRemote/`.
 
 **Operator surfaces:** `http://localhost:8080/activity` is a live browser view of every Claude stdout line (SSE) with a text box to type into the same session; `/qr` renders the magic-link QR for setup.
 
@@ -132,14 +137,15 @@ Claude runs with `--dangerously-skip-permissions` in a configurable working dire
 ## Setup summary
 
 ```bash
-# Server (Mac) — option A: menu bar app (auto-start at login)
-cd bot && bash setup.sh          # one-time: venv, deps, cliclick, LaunchAgent
-# then use the ☁ menu bar icon → Copy Magic Link
+# Server (Mac) — option A: standalone .app (recommended, auto-starts at login)
+cd bot && bash setup.sh          # builds ClaudeCodeRemote.app, installs to /Applications, LaunchAgent
+# then use the ☁ menu bar icon → Configure ngrok… (paste authtoken + free static domain)
+#                              → Copy Magic Link
 
-# Server — option B: manual
+# Server — option B: from source (dev loop)
 source .venv/bin/activate
-python server.py                 # or: python menu_bar.py
-ngrok http 8080                  # separate terminal
+python menu_bar.py               # runs uvicorn + supervised ngrok in-process
+# (no separate `ngrok http 8080` needed — the supervisor handles it)
 
 # iOS
 xcodegen generate                # after adding/renaming Swift files

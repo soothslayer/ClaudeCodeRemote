@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from claude_runner import start_claude, collect_claude, kill_claude
 from claude_session import ClaudeSession
+from paths import config_file as _config_file_path, session_file as _session_file_path, migrate_legacy_state
 
 # ── Activity-window SSE broadcast ─────────────────────────────────────────────
 # Each connected /activity/stream client gets its own asyncio.Queue.
@@ -45,8 +46,9 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-SESSION_FILE = Path(__file__).parent / "session.json"
-CONFIG_FILE  = Path(__file__).parent / "config.json"
+migrate_legacy_state()
+SESSION_FILE = _session_file_path()
+CONFIG_FILE  = _config_file_path()
 
 DEFAULT_WORK_DIR = "~/git/buck"
 
@@ -141,7 +143,8 @@ class ActivitySendRequest(BaseModel):
 
 
 class UpdateSettingsRequest(BaseModel):
-    work_dir: str
+    work_dir: str | None = None
+    ngrok_static_domain: str | None = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -435,7 +438,10 @@ async def health():
 async def get_settings():
     """Return current server-side settings."""
     config = load_config()
-    return {"work_dir": config.get("work_dir", DEFAULT_WORK_DIR)}
+    return {
+        "work_dir": config.get("work_dir", DEFAULT_WORK_DIR),
+        "ngrok_static_domain": config.get("ngrok_static_domain", ""),
+    }
 
 
 @app.post("/settings")
@@ -450,18 +456,28 @@ async def update_settings(req: UpdateSettingsRequest):
     hears an announcement so the user isn't confused about the reset.
     """
     global _duplex_session
-    work_dir = req.work_dir.strip()
-    if not work_dir:
-        raise HTTPException(status_code=400, detail="work_dir cannot be empty")
-
-    old_work_dir = load_config().get("work_dir", DEFAULT_WORK_DIR)
     config = load_config()
-    config["work_dir"] = work_dir
-    save_config(config)
-    logger.info("Settings updated: work_dir=%s", work_dir)
+    old_work_dir = config.get("work_dir", DEFAULT_WORK_DIR)
 
-    changed = os.path.expanduser(work_dir) != os.path.expanduser(old_work_dir)
-    if changed and _duplex_session is not None and _duplex_session.is_running:
+    if req.ngrok_static_domain is not None:
+        config["ngrok_static_domain"] = req.ngrok_static_domain.strip()
+
+    work_dir_changed = False
+    work_dir = old_work_dir
+    if req.work_dir is not None:
+        work_dir = req.work_dir.strip()
+        if not work_dir:
+            raise HTTPException(status_code=400, detail="work_dir cannot be empty")
+        config["work_dir"] = work_dir
+        work_dir_changed = os.path.expanduser(work_dir) != os.path.expanduser(old_work_dir)
+
+    save_config(config)
+    logger.info(
+        "Settings updated: work_dir=%s ngrok_static_domain=%s",
+        work_dir, config.get("ngrok_static_domain", ""),
+    )
+
+    if work_dir_changed and _duplex_session is not None and _duplex_session.is_running:
         logger.info("work_dir changed — tearing down duplex session")
         _duplex_session.close()
         SESSION_FILE.write_text(json.dumps({}))
@@ -471,7 +487,11 @@ async def update_settings(req: UpdateSettingsRequest):
         })
         _duplex_event({"type": "status", "state": "idle"})
 
-    return {"work_dir": work_dir, "session_restarted": changed}
+    return {
+        "work_dir": work_dir,
+        "ngrok_static_domain": config.get("ngrok_static_domain", ""),
+        "session_restarted": work_dir_changed,
+    }
 
 
 @app.get("/settings/browse")
