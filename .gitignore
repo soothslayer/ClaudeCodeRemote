@@ -5,6 +5,11 @@
 xcuserdata/
 *.xcuserstate
 
+# Xcode build output / DerivedData
+build/
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
 # Python
 __pycache__/
 *.pyc

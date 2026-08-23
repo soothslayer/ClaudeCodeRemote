@@ -22,11 +22,26 @@ import time
 import urllib.request
 from typing import Callable
 
-from paths import ngrok_binary
+from paths import log_dir, ngrok_binary
 
 logger = logging.getLogger(__name__)
 
 NGROK_API = "http://127.0.0.1:4040/api/tunnels"
+
+
+def _normalize_domain(raw: str | None) -> str | None:
+    """ngrok's --domain flag wants a bare hostname. Users routinely paste the
+    full URL from the ngrok dashboard, which makes ngrok exit immediately.
+    Strip scheme, path, whitespace, and trailing slashes."""
+    if not raw:
+        return None
+    d = raw.strip()
+    for scheme in ("https://", "http://"):
+        if d.lower().startswith(scheme):
+            d = d[len(scheme):]
+            break
+    d = d.split("/", 1)[0].strip().rstrip(".")
+    return d or None
 
 
 class NgrokSupervisor:
@@ -80,16 +95,20 @@ class NgrokSupervisor:
             logger.error("ngrok binary not found — install it and retry")
             return None
 
-        domain = (self._get_static_domain() or "").strip() or None
+        domain = _normalize_domain(self._get_static_domain())
         cmd = [binary, "http", str(self._port)]
         if domain:
             cmd.extend(["--domain", domain])
         logger.info("Launching ngrok: %s", " ".join(cmd))
         try:
+            stderr_log = open(log_dir() / "ngrok.err.log", "ab", buffering=0)
+        except OSError:
+            stderr_log = subprocess.DEVNULL
+        try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=stderr_log,
             )
         except OSError:
             logger.exception("Failed to spawn ngrok")
@@ -153,7 +172,7 @@ class NgrokSupervisor:
                     break
 
                 # If the configured static domain changed, restart with the new one.
-                configured = (self._get_static_domain() or "").strip() or None
+                configured = _normalize_domain(self._get_static_domain())
                 if configured != self._launched_domain:
                     logger.info(
                         "ngrok static domain changed (%r → %r) — restarting",

@@ -46,7 +46,9 @@ APP = ["menu_bar.py"]
 
 # Everything menu_bar.py imports (directly or lazily) that py2app might miss.
 DATA_FILES: list = []
-RESOURCES = _stage_ngrok()
+# The MCP sidecar must ship as a plain .py: `includes` only compiles it into
+# python3xx.zip, and python3 cannot execute a script from inside a zip.
+RESOURCES = _stage_ngrok() + [str(BOT_DIR / "computer_use_mcp.py")]
 
 OPTIONS = {
     "argv_emulation": False,

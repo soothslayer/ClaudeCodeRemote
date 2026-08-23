@@ -16,6 +16,8 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from paths import claude_binary, mcp_sidecar
+
 logger = logging.getLogger(__name__)
 
 # Directory Claude Code will run in (i.e. the project it works on).
@@ -27,18 +29,22 @@ if not WORK_DIR.exists():
     logger.warning("WORK_DIR %s does not exist — falling back to home directory", WORK_DIR)
     WORK_DIR = Path.home()
 
-# Path to our computer-use MCP server script
-_MCP_SERVER = Path(__file__).parent / "computer_use_mcp.py"
+# Path to our computer-use MCP server script (a real file on disk — under
+# py2app the module itself lives inside python3xx.zip and cannot be run).
+_MCP_SERVER = mcp_sidecar()
 
 # Inline --mcp-config JSON: starts our local computer-use MCP server as a sidecar
+# A missing sidecar means no computer-use tools — but passing a bogus path
+# would leave claude waiting on a stdio server that never handshakes, so drop
+# the entry entirely instead.
 _MCP_CONFIG = json.dumps({
     "mcpServers": {
         "mac-input": {
             "type": "stdio",
             "command": "python3",
-            "args": [str(_MCP_SERVER)],
+            "args": [_MCP_SERVER],
         }
-    }
+    } if _MCP_SERVER else {}
 })
 
 
@@ -65,8 +71,13 @@ def start_claude(
         logger.warning("work_dir %s does not exist — falling back to home", cwd)
         cwd = Path.home()
 
+    claude_exe = claude_binary()
+    if claude_exe is None:
+        raise FileNotFoundError(
+            "`claude` CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+        )
     cmd = [
-        "claude",
+        claude_exe,
         "--print", prompt,
         "--output-format", "json",
         "--dangerously-skip-permissions",

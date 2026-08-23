@@ -247,36 +247,66 @@ struct ContentView: View {
             .accessibilityLabel("Cancel call")
 
         case .onCall:
-            HStack(spacing: 44) {
-                CallControlButton(
-                    icon: appState.isMuted ? "mic.slash.fill" : "mic.fill",
-                    label: appState.isMuted ? "Unmute" : "Mute",
-                    background: appState.isMuted ? .white : Color.white.opacity(0.22),
-                    foreground: appState.isMuted ? .black : .white,
-                    size: 72
-                ) {
-                    Task { await appState.toggleMute() }
-                }
-                .accessibilityLabel(appState.isMuted ? "Unmute microphone" : "Mute microphone")
-                .accessibilityHint(appState.isMuted
-                    ? "Claude will hear you again."
-                    : "Claude keeps talking; only your microphone goes quiet.")
+            VStack(spacing: 22) {
+                HStack(spacing: 44) {
+                    CallControlButton(
+                        icon: appState.isMuted ? "mic.slash.fill" : "mic.fill",
+                        label: appState.isMuted ? "Unmute" : "Mute",
+                        background: appState.isMuted ? .white : Color.white.opacity(0.22),
+                        foreground: appState.isMuted ? .black : .white,
+                        size: 72
+                    ) {
+                        Task { await appState.toggleMute() }
+                    }
+                    .accessibilityLabel(appState.isMuted ? "Unmute microphone" : "Mute microphone")
+                    .accessibilityHint(appState.isMuted
+                        ? "Claude will hear you again."
+                        : "Claude keeps talking; only your microphone goes quiet.")
 
-                audioRouteButton
+                    audioRouteButton
 
-                CallControlButton(
-                    icon: "phone.down.fill",
-                    label: "End",
-                    background: .red,
-                    size: 72
-                ) {
-                    Task { await appState.hangUp() }
+                    CallControlButton(
+                        icon: "phone.down.fill",
+                        label: "End",
+                        background: .red,
+                        size: 72
+                    ) {
+                        Task { await appState.hangUp() }
+                    }
+                    .accessibilityLabel("End call")
+                    .accessibilityHint("Hangs up. Claude keeps working on any running task; call back to resume.")
                 }
-                .accessibilityLabel("End call")
-                .accessibilityHint("Hangs up. Claude keeps working on any running task; call back to resume.")
+
+                #if DEBUG
+                simulateSpeechButton
+                #endif
             }
         }
     }
+
+    #if DEBUG
+    /// Debug-only affordance for verifying the round trip without speaking.
+    ///
+    /// The iOS Simulator has no microphone, so `SFSpeechRecognizer` never
+    /// produces text there and nothing is ever sent. This sends a canned
+    /// utterance down the real path so device → server → response can be
+    /// confirmed; Claude's reply comes back as speech like any other turn.
+    private var simulateSpeechButton: some View {
+        Button {
+            appState.sendSimulatedUtterance()
+        } label: {
+            Label("Send test message", systemImage: "text.bubble.fill")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color.white.opacity(0.22)))
+        }
+        .accessibilityLabel("Send test message")
+        .accessibilityHint("Sends a canned sentence to Claude as if you had spoken it, to check the connection.")
+        .accessibilityIdentifier("simulateSpeechButton")
+    }
+    #endif
 
     /// The system audio-route picker (speaker / receiver / Bluetooth), dressed
     /// as a call button. Fully VoiceOver accessible out of the box.

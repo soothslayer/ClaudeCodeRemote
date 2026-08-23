@@ -24,18 +24,24 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from paths import claude_binary, mcp_sidecar
+
 logger = logging.getLogger(__name__)
 
-# Same computer-use MCP sidecar claude_runner.py uses.
-_MCP_SERVER = Path(__file__).parent / "computer_use_mcp.py"
+# Same computer-use MCP sidecar claude_runner.py uses. Resolved via paths so
+# it points at a real file rather than one inside the py2app zip.
+_MCP_SERVER = mcp_sidecar()
+# A missing sidecar means no computer-use tools — but passing a bogus path
+# would leave claude waiting on a stdio server that never handshakes, so drop
+# the entry entirely instead.
 _MCP_CONFIG = json.dumps({
     "mcpServers": {
         "mac-input": {
             "type": "stdio",
             "command": "python3",
-            "args": [str(_MCP_SERVER)],
+            "args": [_MCP_SERVER],
         }
-    }
+    } if _MCP_SERVER else {}
 })
 
 
@@ -108,8 +114,15 @@ class ClaudeSession:
                 logger.warning("work_dir %s does not exist — using home", cwd)
                 self._work_dir = Path.home()
 
+        claude_exe = claude_binary()
+        if claude_exe is None:
+            raise FileNotFoundError(
+                "`claude` CLI not found on PATH or in common install locations "
+                "(~/.local/bin, /opt/homebrew/bin, /usr/local/bin, npm/nvm/volta prefixes). "
+                "Install it with: npm install -g @anthropic-ai/claude-code"
+            )
         cmd = [
-            "claude",
+            claude_exe,
             "--print",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
