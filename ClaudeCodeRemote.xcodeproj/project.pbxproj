@@ -7,15 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		069D7FFA988E15600A064297 /* LoginItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = D74B3DCB1E09E2AD4E2781BE /* LoginItem.swift */; };
+		07F085A9C4B410AC3C43E402 /* ClaudeCodeRemoteServerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E29244AF4A44770E9E17EA8 /* ClaudeCodeRemoteServerApp.swift */; };
 		0A6FC793DE1E37170D504773 /* VoiceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */; };
 		17C86BB1CD340DBA3B760B98 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7623456EF8908AB075269730 /* SessionManager.swift */; };
+		236CC36D38B4FDA0DC5E60C7 /* NgrokConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C61769CAD7D4643FD4346C /* NgrokConfig.swift */; };
 		387FDD5D29D33C53EEF2D61F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F1C021D81542D058CEE5B5 /* AppDelegate.swift */; };
 		4146788A4DDC3EB366BFF915 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4152E76DB509BBBBA65FD795 /* Assets.xcassets */; };
 		55662655D3CE05BA055131EC /* ClaudeCodeRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */; };
+		710447462D76F971DA21CBF3 /* NgrokSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25B196541E7B438DD308E26A /* NgrokSettingsView.swift */; };
 		80886B1A62F3AD0D6E0307F6 /* ShakeDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44AEB035CBD2593E1BC96A76 /* ShakeDetector.swift */; };
+		9B769FF0FAED313BDEE6D9CF /* BundleLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2644F50ED2DCFC1ED41A0DED /* BundleLayout.swift */; };
 		9C5A790062EA986FCAAE2EFF /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */; };
+		B488C6786C29263175F67266 /* ServerController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB6191248886DBADD7ACBA7 /* ServerController.swift */; };
+		C20E28132E59FF9E92265977 /* ServerLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448EEA1A19B84B7488DD94AB /* ServerLogView.swift */; };
 		C76E8C4667FE363DDE94F030 /* APIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77FD1885D55DC54CBB4EEB22 /* APIService.swift */; };
 		CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */; };
+		D852A806F013D4A4BA87F93E /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80A5D59933164C0A11A50742 /* MenuContent.swift */; };
 		DA5FE098D1E22B26342DFDA7 /* CallManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBA89721CFED3955385BD747 /* CallManager.swift */; };
 		DA8E807E942F28E852713AF5 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */; };
 		E939CC440E8BB5F2FCB0C310 /* RealtimeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8098DD4AF504749C27E7633 /* RealtimeClient.swift */; };
@@ -25,18 +33,28 @@
 
 /* Begin PBXFileReference section */
 		12F1C021D81542D058CEE5B5 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		25B196541E7B438DD308E26A /* NgrokSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NgrokSettingsView.swift; sourceTree = "<group>"; };
+		2644F50ED2DCFC1ED41A0DED /* BundleLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundleLayout.swift; sourceTree = "<group>"; };
+		2F51A22E562559B8EF284BA2 /* ClaudeCodeRemoteServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeCodeRemoteServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		30921D910785AE2707CA2581 /* ClaudeCodeRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeRemoteApp.swift; sourceTree = "<group>"; };
 		37063B2E799F980DF4C247A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		3E0F5D1758A168A8B0D4D8A1 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		4152E76DB509BBBBA65FD795 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		448EEA1A19B84B7488DD94AB /* ServerLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerLogView.swift; sourceTree = "<group>"; };
 		44AEB035CBD2593E1BC96A76 /* ShakeDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShakeDetector.swift; sourceTree = "<group>"; };
 		4D083BC7E9AEC6C873B5E8ED /* VoiceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceManager.swift; sourceTree = "<group>"; };
 		4DE2D1F0CA670BCE9FDB2173 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		4E29244AF4A44770E9E17EA8 /* ClaudeCodeRemoteServerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeRemoteServerApp.swift; sourceTree = "<group>"; };
+		6CDE15B5983E0BF2917AB689 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		73C61769CAD7D4643FD4346C /* NgrokConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NgrokConfig.swift; sourceTree = "<group>"; };
 		7623456EF8908AB075269730 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		77FD1885D55DC54CBB4EEB22 /* APIService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIService.swift; sourceTree = "<group>"; };
+		80A5D59933164C0A11A50742 /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
+		8DB6191248886DBADD7ACBA7 /* ServerController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerController.swift; sourceTree = "<group>"; };
 		ADD9D72C71F6D7B3E71F9AEA /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		CF3F705E5374E00BF6CEBFCE /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ClaudeCodeRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D74B3DCB1E09E2AD4E2781BE /* LoginItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItem.swift; sourceTree = "<group>"; };
 		ECF7706CBEDF6025BEA6C690 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		F8098DD4AF504749C27E7633 /* RealtimeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeClient.swift; sourceTree = "<group>"; };
 		FBA89721CFED3955385BD747 /* CallManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallManager.swift; sourceTree = "<group>"; };
@@ -65,10 +83,27 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		6D151B74BB6FD4160C92A069 /* MacSources */ = {
+			isa = PBXGroup;
+			children = (
+				2644F50ED2DCFC1ED41A0DED /* BundleLayout.swift */,
+				4E29244AF4A44770E9E17EA8 /* ClaudeCodeRemoteServerApp.swift */,
+				6CDE15B5983E0BF2917AB689 /* Info.plist */,
+				D74B3DCB1E09E2AD4E2781BE /* LoginItem.swift */,
+				80A5D59933164C0A11A50742 /* MenuContent.swift */,
+				73C61769CAD7D4643FD4346C /* NgrokConfig.swift */,
+				25B196541E7B438DD308E26A /* NgrokSettingsView.swift */,
+				8DB6191248886DBADD7ACBA7 /* ServerController.swift */,
+				448EEA1A19B84B7488DD94AB /* ServerLogView.swift */,
+			);
+			path = MacSources;
+			sourceTree = "<group>";
+		};
 		B97B74A33CD89F8DF97EDB78 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				D54AE58F72FBE2B74FD79213 /* ClaudeCodeRemote.app */,
+				2F51A22E562559B8EF284BA2 /* ClaudeCodeRemoteServer.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -76,6 +111,7 @@
 		FE97A1992CECC3089958700D = {
 			isa = PBXGroup;
 			children = (
+				6D151B74BB6FD4160C92A069 /* MacSources */,
 				0C87F98CCB9C63ECB2EA147D /* Sources */,
 				B97B74A33CD89F8DF97EDB78 /* Products */,
 			);
@@ -84,6 +120,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		B940C6656C4372B3473438C6 /* ClaudeCodeRemoteServer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ED563A5D161D500A982455F8 /* Build configuration list for PBXNativeTarget "ClaudeCodeRemoteServer" */;
+			buildPhases = (
+				4D542DFEDADC19A88D313E06 /* Sources */,
+				65154A718C5AE7A569D7C5B6 /* Stage Embedded Python Server */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ClaudeCodeRemoteServer;
+			packageProductDependencies = (
+			);
+			productName = ClaudeCodeRemoteServer;
+			productReference = 2F51A22E562559B8EF284BA2 /* ClaudeCodeRemoteServer.app */;
+			productType = "com.apple.product-type.application";
+		};
 		F34CCBF3D3A88101047D3B08 /* ClaudeCodeRemote */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0F41CA371566629FC0F5325E /* Build configuration list for PBXNativeTarget "ClaudeCodeRemote" */;
@@ -111,6 +165,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					B940C6656C4372B3473438C6 = {
+						DevelopmentTeam = KUGPEZH97N;
+						ProvisioningStyle = Automatic;
+					};
 					F34CCBF3D3A88101047D3B08 = {
 						DevelopmentTeam = KUGPEZH97N;
 						ProvisioningStyle = Automatic;
@@ -132,6 +190,7 @@
 			projectRoot = "";
 			targets = (
 				F34CCBF3D3A88101047D3B08 /* ClaudeCodeRemote */,
+				B940C6656C4372B3473438C6 /* ClaudeCodeRemoteServer */,
 			);
 		};
 /* End PBXProject section */
@@ -146,6 +205,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		65154A718C5AE7A569D7C5B6 /* Stage Embedded Python Server */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Stage Embedded Python Server";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/mac/build_python_runtime.sh\"";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		14862D2671A793A8A211147C /* Sources */ = {
@@ -165,6 +247,21 @@
 				CF09D7C608F78AD4A0F049C0 /* SettingsView.swift in Sources */,
 				80886B1A62F3AD0D6E0307F6 /* ShakeDetector.swift in Sources */,
 				0A6FC793DE1E37170D504773 /* VoiceManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D542DFEDADC19A88D313E06 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9B769FF0FAED313BDEE6D9CF /* BundleLayout.swift in Sources */,
+				07F085A9C4B410AC3C43E402 /* ClaudeCodeRemoteServerApp.swift in Sources */,
+				069D7FFA988E15600A064297 /* LoginItem.swift in Sources */,
+				D852A806F013D4A4BA87F93E /* MenuContent.swift in Sources */,
+				236CC36D38B4FDA0DC5E60C7 /* NgrokConfig.swift in Sources */,
+				710447462D76F971DA21CBF3 /* NgrokSettingsView.swift in Sources */,
+				B488C6786C29263175F67266 /* ServerController.swift in Sources */,
+				C20E28132E59FF9E92265977 /* ServerLogView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -223,16 +320,40 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		2583A0B2BF329CEE07944ED2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacSources/ClaudeCodeRemoteServer.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KUGPEZH97N;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = MacSources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claudecoderemote.server;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
 		};
 		AA72EAF71DAB0161C09C7C57 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -253,6 +374,30 @@
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D2857CB07206A6599BB09E7E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacSources/ClaudeCodeRemoteServer.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KUGPEZH97N;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = MacSources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.claudecoderemote.server;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.9;
 			};
 			name = Debug;
 		};
@@ -324,10 +469,10 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -351,6 +496,15 @@
 			buildConfigurations = (
 				AA72EAF71DAB0161C09C7C57 /* Debug */,
 				D43A35224E064EF7E9F8713B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		ED563A5D161D500A982455F8 /* Build configuration list for PBXNativeTarget "ClaudeCodeRemoteServer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D2857CB07206A6599BB09E7E /* Debug */,
+				2583A0B2BF329CEE07944ED2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

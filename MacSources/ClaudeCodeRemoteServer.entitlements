@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- NOT sandboxed, and cannot be: the server execs the `claude` CLI from
+	     ~/.local/bin, Claude edits arbitrary working directories, and the
+	     computer-use MCP posts synthetic input events. This rules out Mac App
+	     Store / TestFlight distribution; ship Developer ID + notarized instead. -->
+
+	<!-- The embedded CPython loads C extensions (.so) we did not sign as a
+	     team-consistent bundle, which the hardened runtime otherwise blocks. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+
+	<!-- python-build-standalone resolves its own prefix; the child server also
+	     inherits PYTHONPATH/PATH we set explicitly. -->
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+
+	<!-- computer_use_mcp.py drives other apps through AppleScript. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

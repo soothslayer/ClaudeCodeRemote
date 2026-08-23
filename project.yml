@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.claudecoderemote
   deploymentTarget:
     iOS: "16.0"
+    macOS: "14.0"
   xcodeVersion: "15.0"
   createIntermediateGroups: true
 
@@ -53,3 +54,49 @@ targets:
         CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: "YES"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_PREVIEWS: "YES"
+
+  # ── macOS menu-bar host for the bot/ server ────────────────────────────────
+  # A thin Swift shell that supervises bot/serve_headless.py (FastAPI + ngrok)
+  # as a child process. The embedded CPython runtime and the server sources are
+  # staged into Contents/Resources by mac/build_python_runtime.sh.
+  #
+  # Distribution is Developer ID + notarization, NOT the Mac App Store: the
+  # server execs the `claude` CLI, edits arbitrary working directories, and
+  # posts synthetic input events, none of which survive the App Sandbox.
+  ClaudeCodeRemoteServer:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: MacSources
+        excludes:
+          - "**/.DS_Store"
+          - "*.entitlements"
+    info:
+      path: MacSources/Info.plist
+      properties:
+        CFBundleName: Claude Code Remote Server
+        CFBundleDisplayName: Claude Code Remote Server
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        NSHighResolutionCapable: true
+        NSHumanReadableCopyright: "Claude Code Remote"
+        NSAppleEventsUsageDescription: "Claude Code Remote controls other apps on your behalf when you ask Claude to use the computer."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.claudecoderemote.server
+        SWIFT_VERSION: "5.9"
+        DEVELOPMENT_TEAM: "KUGPEZH97N"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: MacSources/ClaudeCodeRemoteServer.entitlements
+        ENABLE_HARDENED_RUNTIME: "YES"
+        ENABLE_APP_SANDBOX: "NO"
+        COMBINE_HIDPI_IMAGES: "YES"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    postBuildScripts:
+      - name: Stage Embedded Python Server
+        script: '"$SRCROOT/mac/build_python_runtime.sh"'
+        basedOnDependencyAnalysis: false
+        showEnvVars: false
