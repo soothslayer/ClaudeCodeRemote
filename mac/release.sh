@@ -66,6 +66,30 @@ MSG
     [[ ${NOTARIZE} -eq 1 ]] && exit 1
 fi
 
+# Check the notary credential up front. It is only *used* after the archive and
+# export, and discovering it is missing there costs a full rebuild.
+if [[ ${NOTARIZE} -eq 1 ]]; then
+    if ! xcrun notarytool history --keychain-profile "${NOTARY_PROFILE}" >/dev/null 2>&1; then
+        cat >&2 <<MSG
+error: no stored notarization credential named "${NOTARY_PROFILE}".
+
+  Create it (note the xcrun prefix — notarytool ships inside Xcode and is not
+  on PATH by itself). Omit --password so it prompts, keeping the secret out of
+  your shell history:
+
+      xcrun notarytool store-credentials ${NOTARY_PROFILE} \\
+          --apple-id <your-apple-id> --team-id ${TEAM_ID}
+
+  The password it asks for is an app-specific password, not your Apple ID
+  password: appleid.apple.com -> Sign-In and Security -> App-Specific Passwords.
+
+  To build a signed but un-notarized bundle for local testing:
+      bash mac/release.sh --no-notarize
+MSG
+        exit 1
+    fi
+fi
+
 command -v xcodegen >/dev/null && { log "Regenerating Xcode project"; xcodegen generate; }
 
 # ── 1. Archive ────────────────────────────────────────────────────────────────
