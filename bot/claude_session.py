@@ -25,6 +25,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from paths import claude_binary, mcp_sidecar
+from voice_prompt import VOICE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,7 @@ class ClaudeSession:
             "--verbose",
             "--dangerously-skip-permissions",
             "--mcp-config", _MCP_CONFIG,
+            "--append-system-prompt", VOICE_SYSTEM_PROMPT,
         ]
         if session_id:
             cmd += ["--resume", session_id]
