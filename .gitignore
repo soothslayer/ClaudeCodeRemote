@@ -5,6 +5,11 @@
 xcuserdata/
 *.xcuserstate
 
+# Xcode build output / DerivedData
+build/
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
 # Python
 __pycache__/
 *.pyc
@@ -16,3 +21,8 @@ bot/session.json
 bot/config.json
 bot/chat_id.txt
 bot/.env
+
+# py2app build artifacts
+bot/build/
+bot/dist/
+bot/bin/

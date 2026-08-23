@@ -79,9 +79,22 @@ final class RealtimeClient: NSObject, ObservableObject {
     }
 
     private func send(_ payload: [String: Any]) {
-        guard let ws = task,
-              let data = try? JSONSerialization.data(withJSONObject: payload),
-              let text = String(data: data, encoding: .utf8) else { return }
+        // Dropping a frame silently here is indistinguishable from Claude
+        // simply being slow, so say which half failed.
+        guard let ws = task else {
+            let type = payload["type"] as? String ?? "?"
+            Task { @MainActor in
+                AppLogger.shared.log("WS send dropped (not connected): \(type)", tag: "WS")
+            }
+            return
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else {
+            Task { @MainActor in
+                AppLogger.shared.log("WS send dropped (encode failed)", tag: "WS")
+            }
+            return
+        }
         ws.send(.string(text)) { error in
             if let error {
                 Task { @MainActor in

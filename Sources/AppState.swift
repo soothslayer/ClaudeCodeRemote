@@ -457,6 +457,33 @@ final class AppState: ObservableObject {
         realtimeClient.sendUserText(text)
     }
 
+#if DEBUG
+    /// Canned prompt whose reply is unambiguous, so a successful round trip is
+    /// audible rather than inferred.
+    static let simulatedUtteranceText = "Reply with exactly the words: round trip confirmed."
+
+    /// Debug-only: inject text as if the speech recognizer had produced it.
+    ///
+    /// Deliberately routed through `handleUserUtterance` — the same entry point
+    /// real speech uses — so pressing the button exercises the actual
+    /// send path (`user_text` over the WebSocket) instead of a parallel test
+    /// path that could pass while the real one is broken. This is how the
+    /// device → server → response loop gets verified on the iOS Simulator,
+    /// which has no microphone for `SFSpeechRecognizer` to attach to.
+    func sendSimulatedUtterance(_ text: String = AppState.simulatedUtteranceText) {
+        guard voiceState == .onCall else {
+            AppLogger.shared.log("simulated utterance ignored — not on a call", tag: "TEST")
+            voiceManager.enqueueSpeech("Not on a call. ")
+            return
+        }
+        AppLogger.shared.log("simulated utterance: \"\(text)\"", tag: "TEST")
+        // Spoken acknowledgement: without it a tap that silently fails is
+        // indistinguishable from one that worked but is still thinking.
+        voiceManager.enqueueSpeech("Sending test message. ")
+        handleUserUtterance(text)
+    }
+#endif
+
     private func handleBargeIn() {
         // Speech was already flushed inside VoiceManager. Nothing else to do —
         // the utterance itself will arrive via onUtterance and steer Claude.
