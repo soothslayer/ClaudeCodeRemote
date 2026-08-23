@@ -361,6 +361,7 @@ async def ws_endpoint(websocket: WebSocket):
         while True:
             msg = json.loads(await websocket.receive_text())
             typ = msg.get("type")
+            logger.info("WS recv: type=%s keys=%s", typ, sorted(msg.keys()))
 
             if typ == "start":
                 sess = await asyncio.to_thread(_ensure_duplex, bool(msg.get("resume")))
