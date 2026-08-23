@@ -96,7 +96,7 @@ fi
 
 # ── 8. Install into /Applications ────────────────────────────────────────────
 INSTALLED_APP="/Applications/ClaudeCodeRemote.app"
-echo "Installing to $INSTALLED_APP…"
+echo "Installing to ${INSTALLED_APP}…"
 # Stop any running instance so we can replace the bundle.
 osascript -e 'tell application "ClaudeCodeRemote" to quit' 2>/dev/null || true
 rm -rf "$INSTALLED_APP"
