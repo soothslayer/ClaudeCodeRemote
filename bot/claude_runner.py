@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from paths import claude_binary, mcp_sidecar
+from voice_prompt import VOICE_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ def start_claude(
         "--output-format", "json",
         "--dangerously-skip-permissions",
         "--mcp-config", _MCP_CONFIG,
+        "--append-system-prompt", VOICE_SYSTEM_PROMPT,
     ]
     if session_id:
         cmd += ["--resume", session_id]
