@@ -136,8 +136,9 @@ final class AppState: ObservableObject {
             return
         }
 
-        // Blind-first: opening the app IS the intent to call.
-        await placeCall(resume: sessionManager.hasSession)
+        // Wait for the user to initiate — opening the app no longer auto-calls.
+        await transition(to: .idle)
+        await voiceManager.speakAndWait("Ready. Tap to call Claude Code.")
     }
 
     // MARK: - Magic link (unchanged behaviour)
