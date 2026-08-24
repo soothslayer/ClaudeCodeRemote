@@ -2,18 +2,30 @@ import UIKit
 
 class AppDelegate: NSObject, UIApplicationDelegate {
 
-    /// Default server URL baked into the app so a fresh install can call Claude
-    /// without going through the magic-link/QR setup step first. Users can still
-    /// override it via the setup link, QR scan, or Settings.
-    static let defaultServerURL = "https://unspatial-triston-companionable.ngrok-free.dev"
+    /// Optional default server URL, so a build made for a specific Mac can call
+    /// Claude without going through the magic-link/QR setup step first.
+    ///
+    /// The value comes from `DEFAULT_SERVER_HOST` in `Config/Local.xcconfig`,
+    /// which is gitignored — this is a public repo and an ngrok domain is
+    /// effectively a capability URL. When it is unset the app starts with no
+    /// server and asks for one; the setup link, QR scan, and Settings all still
+    /// override whatever is baked in.
+    static var defaultServerURL: String {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "DefaultServerHost") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return "" }
+        if raw.hasPrefix("http://") || raw.hasPrefix("https://") { return raw }
+        return "https://\(raw)"
+    }
 
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        UserDefaults.standard.register(defaults: [
-            "serverURL": AppDelegate.defaultServerURL
-        ])
+        let defaultURL = AppDelegate.defaultServerURL
+        if !defaultURL.isEmpty {
+            UserDefaults.standard.register(defaults: ["serverURL": defaultURL])
+        }
         return true
     }
 }

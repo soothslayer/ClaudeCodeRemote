@@ -48,6 +48,7 @@ VoiceManager speaks deltas as they stream    └── computer_use_mcp.py sidec
 | File | Key symbol | Purpose |
 |---|---|---|
 | `ClaudeCodeRemoteApp.swift` | `ClaudeCodeRemoteApp` | `@main` entry, attaches minimal `AppDelegate` |
+| `AppDelegate.swift` | `AppDelegate.defaultServerURL` | Optional baked-in default server URL, read from the `DefaultServerHost` Info.plist key (fed by `DEFAULT_SERVER_HOST` in the gitignored `Config/Local.xcconfig`). Empty in a clean checkout — no server URL is committed to this public repo — in which case `onAppear()` asks for one instead of dialing |
 | `AppState.swift` | `AppState` (`@MainActor ObservableObject`) | Central coordinator; owns `VoiceManager`, `CallManager`, `RealtimeClient`, `APIService`, `SessionManager` |
 | `AppState.swift` | `VoiceState` (enum) | `idle` → `dialing` → `onCall` (+ `error`); sub-states `isSpeaking`/`isListening`/`isWorking`/`isMuted` overlap during `onCall` |
 | `CallManager.swift` | `CallManager` | CallKit wrapper (`CXProvider` + `CXCallController`). Mute is single-sourced through `CXSetMutedCallAction` so app UI, lock screen, and AirPods stay in sync |
@@ -156,5 +157,7 @@ open ClaudeCodeRemote.xcodeproj  # sign with Apple ID, run on device
 ```
 
 All source files live flat in `Sources/` — XcodeGen (`brew install xcodegen`) picks them up automatically from `project.yml`.
+
+`Config/Base.xcconfig` (committed, wired to both build configs by `project.yml`) declares `DEFAULT_SERVER_HOST` empty and optionally includes `Config/Local.xcconfig` (gitignored, `#include?`) — that's where a personal ngrok domain goes, host only because xcconfig treats `//` as a comment. It reaches Swift through the `DefaultServerHost` Info.plist key. Never commit a server URL: the ngrok domain is a capability URL for the Mac running Claude Code.
 
 If `xcodebuild` fails from the CLI with a CoreSimulator version mismatch after an Xcode update, open Xcode once (or reboot) to let it finish installing; building to a device from the Xcode GUI is unaffected. If `xcode-select` points at CommandLineTools, prefix CLI builds with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
