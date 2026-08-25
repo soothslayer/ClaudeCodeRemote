@@ -1,0 +1,17 @@
+// Build settings shared by every configuration.
+//
+// The default server host is deliberately empty here: this is a public repo and
+// an ngrok domain is effectively a capability URL — anyone who has it can reach
+// the Mac running Claude Code. Keep yours out of git.
+//
+// To bake a default into your own builds, copy Local.example.xcconfig to
+// Local.xcconfig (gitignored) and set DEFAULT_SERVER_HOST there. Leave it unset
+// and the app simply asks for the server URL on first launch, which the magic
+// link, QR scan, or Settings all fill in.
+//
+// Host only, no scheme: xcconfig treats "//" as the start of a comment, so
+// "https://example.ngrok-free.dev" would be truncated to "https:". The app adds
+// the https:// prefix itself.
+DEFAULT_SERVER_HOST =
+
+#include? "Local.xcconfig"

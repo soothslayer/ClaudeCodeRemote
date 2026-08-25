@@ -26,3 +26,6 @@ bot/.env
 bot/build/
 bot/dist/
 bot/bin/
+
+# Local build overrides (contains your own server host)
+Config/Local.xcconfig

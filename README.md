@@ -103,7 +103,29 @@ The first time (or after ngrok gives a new URL):
 2. **Long press** anywhere on the screen for 1.5 seconds → Settings opens.
 3. Paste the ngrok `https://` URL into the **Bot Server URL** field → **Save**.
 
+Easier for a blind user: text them the magic link the server prints
+(`clauderemote://setup?url=…`, also available as a QR code at
+`http://localhost:8080/qr`) — tapping it sets the URL with no typing.
+
 That's all the configuration your blind friend ever needs to do (or have done for them once).
+
+#### Optional: bake a default server host into your own builds
+
+No server URL is committed to this repo — an ngrok domain is effectively a
+capability URL, so publishing one hands anybody a line to the Mac running Claude
+Code. If you'd rather your own builds ship pre-pointed at your server so a fresh
+install can call straight away:
+
+```bash
+cp Config/Local.example.xcconfig Config/Local.xcconfig
+# edit it: DEFAULT_SERVER_HOST = your-domain.ngrok-free.dev
+xcodegen generate
+```
+
+`Config/Local.xcconfig` is gitignored. Use the host only — no `https://` scheme
+(xcconfig reads `//` as a comment) and no trailing slash; the app adds the
+scheme. Leave it unset and the app just asks for a server on first launch. The
+magic link, QR scan, and Settings override the baked-in value either way.
 
 ---
 

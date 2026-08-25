@@ -15,6 +15,9 @@ targets:
       - path: Sources
         excludes:
           - "**/.DS_Store"
+    configFiles:
+      Debug: Config/Base.xcconfig
+      Release: Config/Base.xcconfig
     info:
       path: Sources/Info.plist
       properties:
@@ -22,6 +25,7 @@ targets:
         CFBundleIconName: AppIcon
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
+        DefaultServerHost: $(DEFAULT_SERVER_HOST)
         NSMicrophoneUsageDescription: "Claude Code Remote needs your microphone to hear voice commands."
         NSSpeechRecognitionUsageDescription: "Claude Code Remote uses speech recognition to convert your voice to text for Claude Code."
         NSCameraUsageDescription: "Claude Code Remote uses the camera to scan QR codes for server URL setup."
